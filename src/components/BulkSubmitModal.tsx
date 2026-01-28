@@ -13,6 +13,13 @@ const COLORS = {
   error: "#f87171",
 };
 
+function formatHours(hours: number): string {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (m === 0) return `${h}h`;
+  return `${h}h${m}m`;
+}
+
 export function BulkSubmitModal({ missingDays, hours, saving, progress, error }: BulkSubmitModalProps) {
   const totalHours = missingDays.length * hours;
 
@@ -38,7 +45,7 @@ export function BulkSubmitModal({ missingDays, hours, saving, progress, error }:
       </box>
 
       <box justifyContent="center" marginBottom={1}>
-        <text attributes={TextAttributes.DIM}>{`Will submit ${hours}h for each (${totalHours}h total)`}</text>
+        <text attributes={TextAttributes.DIM}>{`Will submit ${formatHours(hours)} for each (${formatHours(totalHours)} total)`}</text>
       </box>
 
       {saving ? (

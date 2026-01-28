@@ -587,6 +587,8 @@ function App({ client, renderer }: AppProps) {
       return;
     }
     
+    const hoursPerDay = getScheduleHours(settings.workSchedule);
+    
     stateRef.current.bulkProgress = 0;
     stateRef.current.saveError = null;
     stateRef.current.saving = false;
@@ -607,7 +609,7 @@ function App({ client, renderer }: AppProps) {
         content: () => (
           <BulkSubmitModal
             missingDays={missingDays}
-            hours={8}
+            hours={hoursPerDay}
             saving={stateRef.current.saving}
             progress={stateRef.current.bulkProgress}
             error={stateRef.current.saveError}
@@ -630,7 +632,7 @@ function App({ client, renderer }: AppProps) {
         for (let i = 0; i < missingDays.length; i++) {
           const dateStr = missingDays[i];
           if (!dateStr) continue;
-          await client.storeHourEntry({ date: dateStr, hours: 8 });
+          await client.storeHourEntry({ date: dateStr, hours: hoursPerDay });
           stateRef.current.bulkProgress = i + 1;
           updateDialog();
         }
@@ -652,7 +654,7 @@ function App({ client, renderer }: AppProps) {
     bulkHandlerRef = bulkHandler;
     renderer.keyInput.on("keypress", bulkHandler);
     updateDialog();
-  }, [dialog, renderer, client, getMissingDays, refreshEntries]);
+  }, [dialog, renderer, client, settings, getMissingDays, refreshEntries]);
 
   const showConfigModal = useCallback(() => {
     if (stateRef.current.dialogOpen) return;

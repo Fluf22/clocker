@@ -85,7 +85,7 @@ export class BambooHRClient {
     if (!this.employeeId) {
       throw new Error("Employee ID not set. Call getEmployee() first.");
     }
-    return this.fetch<HourEntryResponse>(
+    const response = await this.fetch<HourEntryResponse[]>(
       `/api/v1/time_tracking/hour_entries/store`,
       {
         method: "POST",
@@ -93,11 +93,18 @@ export class BambooHRClient {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ...entry,
-          employeeId: Number(this.employeeId),
+          hours: [{
+            ...entry,
+            employeeId: Number(this.employeeId),
+          }],
         }),
       }
     );
+    const result = response[0];
+    if (!result) {
+      throw new Error("No response from API");
+    }
+    return result;
   }
 
   async storeHourEntries(entries: HourEntryRequest[]): Promise<HourEntryResponse[]> {
