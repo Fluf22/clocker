@@ -10,7 +10,7 @@ import { Calendar } from "./components/Calendar.tsx";
 import { DayModal } from "./components/DayModal.tsx";
 import { EditModal } from "./components/EditModal.tsx";
 import { BulkSubmitModal } from "./components/BulkSubmitModal.tsx";
-import { ConfigModal, type ConfigField } from "./components/ConfigModal.tsx";
+import { ConfigModal, adjustTimeDigit, type ConfigField } from "./components/ConfigModal.tsx";
 import { SettingsProvider, useSettings } from "./context/SettingsContext.tsx";
 import type { Employee, BasicCredentials, TimesheetEntry, TimeOffRequest, Holiday, WorkSchedule } from "./types/index.ts";
 
@@ -198,6 +198,8 @@ function App({ client, renderer }: AppProps) {
     dialogOpen: false,
     configSchedule: null as WorkSchedule | null,
     configActiveField: "morningStart" as ConfigField,
+    configCursorPosition: 0,
+    configBlinkOn: true,
   });
 
   useEffect(() => {
@@ -551,15 +553,22 @@ function App({ client, renderer }: AppProps) {
       afternoon: { ...settings.workSchedule.afternoon },
     };
     stateRef.current.configActiveField = "morningStart";
+    stateRef.current.configCursorPosition = 0;
+    stateRef.current.configBlinkOn = true;
     stateRef.current.saveError = null;
     stateRef.current.saving = false;
     
     let configHandlerRef: ((event: { name: string; shift?: boolean }) => void) | null = null;
+    let blinkIntervalRef: ReturnType<typeof setInterval> | null = null;
     
     const cleanup = () => {
       if (configHandlerRef) {
         renderer.keyInput.off("keypress", configHandlerRef);
         configHandlerRef = null;
+      }
+      if (blinkIntervalRef) {
+        clearInterval(blinkIntervalRef);
+        blinkIntervalRef = null;
       }
       stateRef.current.dialogOpen = false;
       stateRef.current.saving = false;
@@ -572,6 +581,8 @@ function App({ client, renderer }: AppProps) {
           <ConfigModal
             schedule={stateRef.current.configSchedule!}
             activeField={stateRef.current.configActiveField}
+            cursorPosition={stateRef.current.configCursorPosition}
+            blinkOn={stateRef.current.configBlinkOn}
             saving={stateRef.current.saving}
             error={stateRef.current.saveError}
           />
@@ -583,10 +594,15 @@ function App({ client, renderer }: AppProps) {
       });
     };
 
+    blinkIntervalRef = setInterval(() => {
+      stateRef.current.configBlinkOn = !stateRef.current.configBlinkOn;
+      updateDialog();
+    }, 500);
+
     const fields: ConfigField[] = ["morningStart", "morningEnd", "afternoonStart", "afternoonEnd"];
     
     const getFieldValue = (field: ConfigField): string => {
-      if (!stateRef.current.configSchedule) return "";
+      if (!stateRef.current.configSchedule) return "00:00";
       switch (field) {
         case "morningStart": return stateRef.current.configSchedule.morning.start;
         case "morningEnd": return stateRef.current.configSchedule.morning.end;
@@ -613,21 +629,8 @@ function App({ client, renderer }: AppProps) {
       }
     };
 
-    const isValidTime = (time: string): boolean => {
-      const match = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/.exec(time);
-      return match !== null;
-    };
-
     const saveConfig = async () => {
       if (!stateRef.current.configSchedule) return;
-      
-      for (const field of fields) {
-        if (!isValidTime(getFieldValue(field))) {
-          stateRef.current.saveError = `Invalid time format for ${field}`;
-          updateDialog();
-          return;
-        }
-      }
       
       stateRef.current.saving = true;
       stateRef.current.saveError = null;
@@ -654,37 +657,48 @@ function App({ client, renderer }: AppProps) {
         return;
       }
       
-      if (event.name === "tab" || event.name === "down") {
+      if (event.name === "tab") {
         const currentIndex = fields.indexOf(stateRef.current.configActiveField);
         const nextIndex = event.shift 
           ? (currentIndex - 1 + fields.length) % fields.length
           : (currentIndex + 1) % fields.length;
         stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
+        stateRef.current.configCursorPosition = 0;
+        stateRef.current.configBlinkOn = true;
+        updateDialog();
+        return;
+      }
+      
+      if (event.name === "left") {
+        stateRef.current.configCursorPosition = Math.max(0, stateRef.current.configCursorPosition - 1);
+        stateRef.current.configBlinkOn = true;
+        updateDialog();
+        return;
+      }
+      
+      if (event.name === "right") {
+        stateRef.current.configCursorPosition = Math.min(3, stateRef.current.configCursorPosition + 1);
+        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
       }
       
       if (event.name === "up") {
-        const currentIndex = fields.indexOf(stateRef.current.configActiveField);
-        const nextIndex = (currentIndex - 1 + fields.length) % fields.length;
-        stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
+        const currentValue = getFieldValue(stateRef.current.configActiveField);
+        const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, 1);
+        setFieldValue(stateRef.current.configActiveField, newValue);
+        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
       }
       
-      if (event.name === "backspace") {
+      if (event.name === "down") {
         const currentValue = getFieldValue(stateRef.current.configActiveField);
-        setFieldValue(stateRef.current.configActiveField, currentValue.slice(0, -1));
+        const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, -1);
+        setFieldValue(stateRef.current.configActiveField, newValue);
+        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
-      }
-      
-      if (/^[0-9:]$/.test(event.name)) {
-        const currentValue = getFieldValue(stateRef.current.configActiveField);
-        if (currentValue.length < 5) {
-          setFieldValue(stateRef.current.configActiveField, currentValue + event.name);
-          updateDialog();
-        }
       }
     };
     
