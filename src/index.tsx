@@ -8,9 +8,9 @@ import { loadCredentials, saveCredentials } from "./config/credentials.ts";
 import { BambooHRClient } from "./api/client.ts";
 import { Calendar } from "./components/Calendar.tsx";
 import { DayModal } from "./components/DayModal.tsx";
-import { EditModal } from "./components/EditModal.tsx";
+import { EditModal, adjustTimeDigit, getScheduleHours, extractScheduleFromEntries, type EditField } from "./components/EditModal.tsx";
 import { BulkSubmitModal } from "./components/BulkSubmitModal.tsx";
-import { ConfigModal, adjustTimeDigit, type ConfigField } from "./components/ConfigModal.tsx";
+import { ConfigModal, type ConfigField } from "./components/ConfigModal.tsx";
 import { SettingsProvider, useSettings } from "./context/SettingsContext.tsx";
 import type { Employee, BasicCredentials, TimesheetEntry, TimeOffRequest, Holiday, WorkSchedule } from "./types/index.ts";
 
@@ -191,7 +191,6 @@ function App({ client, renderer }: AppProps) {
   const daysInMonth = getDaysInMonth(year, month);
   
   const stateRef = useRef({
-    editHours: "",
     saving: false,
     saveError: null as string | null,
     bulkProgress: 0,
@@ -199,6 +198,9 @@ function App({ client, renderer }: AppProps) {
     configSchedule: null as WorkSchedule | null,
     configActiveField: "morningStart" as ConfigField,
     configCursorPosition: 0,
+    editSchedule: null as WorkSchedule | null,
+    editActiveField: "morningStart" as EditField,
+    editCursorPosition: 0,
   });
   
   const showEditModalRef = useRef<(() => void) | null>(null);
@@ -427,10 +429,13 @@ function App({ client, renderer }: AppProps) {
     }
     
     const dayEntries = entries.filter((e) => e.date === dateStr);
-    stateRef.current.editHours = "";
+    stateRef.current.editSchedule = extractScheduleFromEntries(dayEntries, settings.workSchedule);
+    stateRef.current.editActiveField = "morningStart";
+    stateRef.current.editCursorPosition = 0;
     stateRef.current.saveError = null;
+    stateRef.current.saving = false;
     
-    let editHandlerRef: ((event: { name: string }) => void) | null = null;
+    let editHandlerRef: ((event: { name: string; shift?: boolean }) => void) | null = null;
     
     const cleanup = () => {
       if (editHandlerRef) {
@@ -442,15 +447,16 @@ function App({ client, renderer }: AppProps) {
     };
     
     const updateDialog = () => {
+      if (!stateRef.current.editSchedule) return;
       dialog.show({
         content: () => (
           <EditModal
             date={dateStr}
-            entries={dayEntries}
-            hours={stateRef.current.editHours}
+            schedule={stateRef.current.editSchedule!}
+            activeField={stateRef.current.editActiveField}
+            cursorPosition={stateRef.current.editCursorPosition}
             saving={stateRef.current.saving}
             error={stateRef.current.saveError}
-            onClose={() => dialog.close()}
           />
         ),
         closeOnEscape: !stateRef.current.saving,
@@ -460,13 +466,46 @@ function App({ client, renderer }: AppProps) {
       });
     };
 
+    const fields: EditField[] = ["morningStart", "morningEnd", "afternoonStart", "afternoonEnd"];
+    
+    const getFieldValue = (field: EditField): string => {
+      if (!stateRef.current.editSchedule) return "00:00";
+      switch (field) {
+        case "morningStart": return stateRef.current.editSchedule.morning.start;
+        case "morningEnd": return stateRef.current.editSchedule.morning.end;
+        case "afternoonStart": return stateRef.current.editSchedule.afternoon.start;
+        case "afternoonEnd": return stateRef.current.editSchedule.afternoon.end;
+      }
+    };
+    
+    const setFieldValue = (field: EditField, value: string) => {
+      if (!stateRef.current.editSchedule) return;
+      switch (field) {
+        case "morningStart":
+          stateRef.current.editSchedule.morning.start = value;
+          break;
+        case "morningEnd":
+          stateRef.current.editSchedule.morning.end = value;
+          break;
+        case "afternoonStart":
+          stateRef.current.editSchedule.afternoon.start = value;
+          break;
+        case "afternoonEnd":
+          stateRef.current.editSchedule.afternoon.end = value;
+          break;
+      }
+    };
+
     const saveHours = async () => {
-      const hours = parseFloat(stateRef.current.editHours);
-      if (isNaN(hours) || hours < 0 || hours > 24) {
+      if (!stateRef.current.editSchedule) return;
+      
+      const hours = getScheduleHours(stateRef.current.editSchedule);
+      if (hours < 0 || hours > 24) {
         stateRef.current.saveError = "Invalid hours (0-24)";
         updateDialog();
         return;
       }
+      
       stateRef.current.saving = true;
       stateRef.current.saveError = null;
       updateDialog();
@@ -482,21 +521,51 @@ function App({ client, renderer }: AppProps) {
       }
     };
 
-    const editHandler = (event: { name: string }) => {
+    const editHandler = (event: { name: string; shift?: boolean }) => {
       if (stateRef.current.saving) return;
       
       if (event.name === "return") {
         saveHours();
         return;
       }
-      if (event.name === "backspace") {
-        stateRef.current.editHours = stateRef.current.editHours.slice(0, -1);
+      
+      if (event.name === "tab") {
+        const currentIndex = fields.indexOf(stateRef.current.editActiveField);
+        const nextIndex = event.shift 
+          ? (currentIndex - 1 + fields.length) % fields.length
+          : (currentIndex + 1) % fields.length;
+        stateRef.current.editActiveField = fields[nextIndex] ?? "morningStart";
+        stateRef.current.editCursorPosition = 0;
         updateDialog();
         return;
       }
-      if (/^[0-9.]$/.test(event.name) && stateRef.current.editHours.length < 4) {
-        stateRef.current.editHours += event.name;
+      
+      if (event.name === "left") {
+        stateRef.current.editCursorPosition = Math.max(0, stateRef.current.editCursorPosition - 1);
         updateDialog();
+        return;
+      }
+      
+      if (event.name === "right") {
+        stateRef.current.editCursorPosition = Math.min(3, stateRef.current.editCursorPosition + 1);
+        updateDialog();
+        return;
+      }
+      
+      if (event.name === "up") {
+        const currentValue = getFieldValue(stateRef.current.editActiveField);
+        const newValue = adjustTimeDigit(currentValue, stateRef.current.editCursorPosition, 1);
+        setFieldValue(stateRef.current.editActiveField, newValue);
+        updateDialog();
+        return;
+      }
+      
+      if (event.name === "down") {
+        const currentValue = getFieldValue(stateRef.current.editActiveField);
+        const newValue = adjustTimeDigit(currentValue, stateRef.current.editCursorPosition, -1);
+        setFieldValue(stateRef.current.editActiveField, newValue);
+        updateDialog();
+        return;
       }
     };
     
@@ -504,7 +573,7 @@ function App({ client, renderer }: AppProps) {
     renderer.keyInput.on("keypress", editHandler);
     updateDialog();
     
-  }, [dialog, renderer, client, year, month, selectedDay, entries, refreshEntries, getDayInfo]);
+  }, [dialog, renderer, client, year, month, selectedDay, settings, refreshEntries, getDayInfo]);
 
   showEditModalRef.current = showEditModal;
 
