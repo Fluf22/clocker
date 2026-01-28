@@ -1,4 +1,4 @@
-import type { Credentials, OAuthCredentials, Employee, TimesheetEntry, TimeOffRequest, HourEntryRequest, HourEntryResponse, Holiday } from "../types/index.ts";
+import type { Credentials, OAuthCredentials, Employee, TimesheetEntry, TimeOffRequest, HourEntryRequest, HourEntryResponse, ClockEntryRequest, ClockEntryResponse, Holiday } from "../types/index.ts";
 import { saveCredentials, isTokenExpired } from "../config/credentials.ts";
 import { refreshAccessToken } from "./auth.ts";
 
@@ -109,6 +109,32 @@ export class BambooHRClient {
 
   async storeHourEntries(entries: HourEntryRequest[]): Promise<HourEntryResponse[]> {
     return Promise.all(entries.map((entry) => this.storeHourEntry(entry)));
+  }
+
+  async storeClockEntry(entry: ClockEntryRequest): Promise<ClockEntryResponse> {
+    if (!this.employeeId) {
+      throw new Error("Employee ID not set. Call getEmployee() first.");
+    }
+    const response = await this.fetch<ClockEntryResponse[]>(
+      `/api/v1/time_tracking/clock_entries/store`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          entries: [{
+            ...entry,
+            employeeId: Number(this.employeeId),
+          }],
+        }),
+      }
+    );
+    const result = response[0];
+    if (!result) {
+      throw new Error("No response from API");
+    }
+    return result;
   }
 
   async getHolidays(start: string, end: string): Promise<Holiday[]> {

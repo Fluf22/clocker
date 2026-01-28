@@ -96,6 +96,25 @@ export interface HourEntryResponse {
   note?: string;
 }
 
+export interface ClockEntryRequest {
+  date: string;
+  start: string;
+  end: string;
+  id?: number;
+  projectId?: number;
+  taskId?: number;
+  note?: string;
+}
+
+export interface ClockEntryResponse {
+  id: number;
+  employeeId: number;
+  date: string;
+  start: string;
+  end: string;
+  note?: string;
+}
+
 export interface WhosOutEntry {
   type: "timeOff" | "holiday";
   employeeId?: number;

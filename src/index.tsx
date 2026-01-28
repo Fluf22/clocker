@@ -496,10 +496,11 @@ function App({ client, renderer }: AppProps) {
       }
     };
 
-    const saveHours = async () => {
+    const saveClockEntries = async () => {
       if (!stateRef.current.editSchedule) return;
       
-      const hours = getScheduleHours(stateRef.current.editSchedule);
+      const schedule = stateRef.current.editSchedule;
+      const hours = getScheduleHours(schedule);
       if (hours < 0 || hours > 24) {
         stateRef.current.saveError = "Invalid hours (0-24)";
         updateDialog();
@@ -511,7 +512,17 @@ function App({ client, renderer }: AppProps) {
       updateDialog();
       
       try {
-        await client.storeHourEntry({ date: dateStr, hours });
+        await client.storeClockEntry({
+          date: dateStr,
+          start: schedule.morning.start,
+          end: schedule.morning.end,
+        });
+        await client.storeClockEntry({
+          date: dateStr,
+          start: schedule.afternoon.start,
+          end: schedule.afternoon.end,
+        });
+        
         refreshEntries();
         dialog.close();
       } catch (err) {
@@ -525,7 +536,7 @@ function App({ client, renderer }: AppProps) {
       if (stateRef.current.saving) return;
       
       if (event.name === "return") {
-        saveHours();
+        saveClockEntries();
         return;
       }
       
@@ -628,11 +639,24 @@ function App({ client, renderer }: AppProps) {
       stateRef.current.bulkProgress = 0;
       updateDialog();
 
+      const schedule = settings.workSchedule;
+      
       try {
         for (let i = 0; i < missingDays.length; i++) {
           const dateStr = missingDays[i];
           if (!dateStr) continue;
-          await client.storeHourEntry({ date: dateStr, hours: hoursPerDay });
+          
+          await client.storeClockEntry({
+            date: dateStr,
+            start: schedule.morning.start,
+            end: schedule.morning.end,
+          });
+          await client.storeClockEntry({
+            date: dateStr,
+            start: schedule.afternoon.start,
+            end: schedule.afternoon.end,
+          });
+          
           stateRef.current.bulkProgress = i + 1;
           updateDialog();
         }
