@@ -260,8 +260,8 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      <box 
-        flexDirection="row" 
+      <box
+        flexDirection="row"
         justifyContent="space-between" 
         alignItems="center" 
         marginBottom={1}

@@ -114,8 +114,8 @@ function StatusBar() {
       <text attributes={TextAttributes.DIM}>[Arrows] Navigate</text>
       <text attributes={TextAttributes.DIM}>[Enter] View</text>
       <text attributes={TextAttributes.DIM}>[E] Edit</text>
-      <text attributes={TextAttributes.DIM}>[S] Bulk 8h</text>
-      <text attributes={TextAttributes.DIM}>[P/N] Month</text>
+      <text attributes={TextAttributes.DIM}>[S] Bulk Submit</text>
+      <text attributes={TextAttributes.DIM}>[P/N] Prev/Next Month</text>
       <text attributes={TextAttributes.DIM}>[C] Config</text>
       <text attributes={TextAttributes.DIM}>[Q] Quit</text>
     </box>
@@ -796,11 +796,11 @@ function App({ client, renderer }: AppProps) {
   }
 
   return (
-    <box flexDirection="column" flexGrow={1} backgroundColor="#0f172a">
+    <box flexDirection="column" flexGrow={1} backgroundColor="#1f1f1f">
       <box flexDirection="row" flexGrow={1}>
         <Sidebar employee={employee} />
 
-        <box flexDirection="column" flexGrow={1} padding={1}>
+        <box flexDirection="column" flexGrow={1} padding={1} paddingTop={0}>
           <Calendar
             year={year}
             month={month}
