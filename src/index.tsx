@@ -1,16 +1,814 @@
-import { createCliRenderer, TextAttributes } from "@opentui/core";
-import { createRoot } from "@opentui/react";
+import { createInterface } from "node:readline/promises";
+import { stdin, stdout } from "node:process";
+import { createCliRenderer, TextAttributes, type CliRenderer } from "@opentui/core";
+import { createRoot, useRenderer } from "@opentui/react";
+import { DialogProvider, useDialog, useDialogState } from "@opentui-ui/dialog/react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { loadCredentials, saveCredentials } from "./config/credentials.ts";
+import { BambooHRClient } from "./api/client.ts";
+import { Calendar } from "./components/Calendar.tsx";
+import { DayModal } from "./components/DayModal.tsx";
+import { EditModal } from "./components/EditModal.tsx";
+import { BulkSubmitModal } from "./components/BulkSubmitModal.tsx";
+import { ConfigModal, type ConfigField } from "./components/ConfigModal.tsx";
+import { SettingsProvider, useSettings } from "./context/SettingsContext.tsx";
+import type { Employee, BasicCredentials, TimesheetEntry, TimeOffRequest, Holiday, WorkSchedule } from "./types/index.ts";
 
-function App() {
+function openBrowser(url: string): void {
+  const platform = process.platform;
+  const cmd = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
+  Bun.spawn([cmd, url]);
+}
+
+async function promptForInput(question: string): Promise<string> {
+  const rl = createInterface({ input: stdin, output: stdout });
+  const answer = await rl.question(question);
+  rl.close();
+  return answer.trim();
+}
+
+async function setupCredentials(): Promise<BasicCredentials> {
+  console.log("\n=== Clocker TUI Setup ===\n");
+
+  const companyDomain = await promptForInput("Company domain (e.g., 'yourcompany' from yourcompany.bamboohr.com): ");
+
+  if (!companyDomain) {
+    console.error("Company domain is required.");
+    process.exit(1);
+  }
+
+  const apiKeysUrl = `https://${companyDomain}.bamboohr.com/settings/permissions/api.php`;
+  console.log(`\nOpening ${apiKeysUrl} to generate an API key...`);
+  openBrowser(apiKeysUrl);
+
+  console.log("\nOnce you've created an API key, paste it below.\n");
+  const apiKey = await promptForInput("API Key: ");
+
+  if (!apiKey) {
+    console.error("API key is required.");
+    process.exit(1);
+  }
+
+  const credentials: BasicCredentials = {
+    type: "basic",
+    companyDomain,
+    apiKey,
+  };
+
+  await saveCredentials(credentials);
+  console.log("\nCredentials saved!\n");
+
+  return credentials;
+}
+
+const COLORS = {
+  sidebar: "#a5b4fc",
+  statusBar: "#6b7280",
+  accent: "#c4b5fd",
+};
+
+function Sidebar({ employee }: { employee: Employee | null }) {
+  if (!employee) {
+    return (
+      <box width={26} flexDirection="column" borderStyle="rounded" borderColor={COLORS.sidebar} padding={1}>
+        <text attributes={TextAttributes.DIM}>Loading...</text>
+      </box>
+    );
+  }
+
+  const displayName = employee.displayName ?? `${employee.firstName} ${employee.lastName}`;
+
   return (
-    <box alignItems="center" justifyContent="center" flexGrow={1}>
-      <box justifyContent="center" alignItems="flex-end">
-        <ascii-font font="tiny" text="OpenTUI" />
-        <text attributes={TextAttributes.DIM}>What will you build?</text>
+    <box width={26} flexDirection="column" borderStyle="rounded" borderColor={COLORS.sidebar} padding={1}>
+      <box marginBottom={1}>
+        <text attributes={TextAttributes.BOLD}>User</text>
+      </box>
+      
+      <box flexDirection="column" gap={1}>
+        <box flexDirection="column">
+          <text attributes={TextAttributes.DIM}>Name</text>
+          <text attributes={TextAttributes.BOLD}>{displayName}</text>
+        </box>
+        
+        {employee.jobTitle && (
+          <box flexDirection="column">
+            <text attributes={TextAttributes.DIM}>Role</text>
+            <text>{employee.jobTitle}</text>
+          </box>
+        )}
+        
+        {employee.department && (
+          <box flexDirection="column">
+            <text attributes={TextAttributes.DIM}>Team</text>
+            <text>{employee.department}</text>
+          </box>
+        )}
       </box>
     </box>
   );
 }
 
-const renderer = await createCliRenderer();
-createRoot(renderer).render(<App />);
+function StatusBar() {
+  return (
+    <box borderStyle="rounded" borderColor={COLORS.statusBar} padding={1} flexDirection="row" justifyContent="center" gap={3}>
+      <text attributes={TextAttributes.DIM}>[Arrows] Navigate</text>
+      <text attributes={TextAttributes.DIM}>[Enter] View</text>
+      <text attributes={TextAttributes.DIM}>[E] Edit</text>
+      <text attributes={TextAttributes.DIM}>[S] Bulk 8h</text>
+      <text attributes={TextAttributes.DIM}>[P/N] Month</text>
+      <text attributes={TextAttributes.DIM}>[C] Config</text>
+      <text attributes={TextAttributes.DIM}>[Q] Quit</text>
+    </box>
+  );
+}
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function formatDate(year: number, month: number, day: number): string {
+  const m = String(month + 1).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${year}-${m}-${d}`;
+}
+
+function isWeekend(year: number, month: number, day: number): boolean {
+  const dayOfWeek = new Date(year, month, day).getDay();
+  return dayOfWeek === 0 || dayOfWeek === 6;
+}
+
+function findNextWeekday(year: number, month: number, day: number, delta: number, daysInMonth: number): number {
+  let next = day + delta;
+  while (next >= 1 && next <= daysInMonth && isWeekend(year, month, next)) {
+    next += delta;
+  }
+  if (next < 1 || next > daysInMonth) return day;
+  return next;
+}
+
+interface AppProps {
+  client: BambooHRClient;
+  renderer: CliRenderer;
+}
+
+function getInitialWeekday(year: number, month: number, day: number): number {
+  const daysInMonth = getDaysInMonth(year, month);
+  let d = day;
+  while (d <= daysInMonth && isWeekend(year, month, d)) {
+    d++;
+  }
+  if (d > daysInMonth) {
+    d = day;
+    while (d >= 1 && isWeekend(year, month, d)) {
+      d--;
+    }
+  }
+  return Math.max(1, d);
+}
+
+function App({ client, renderer }: AppProps) {
+  const dialog = useDialog();
+  const isDialogOpen = useDialogState((s) => s.isOpen);
+  const { settings, updateSettings } = useSettings();
+  
+  const now = new Date();
+  const initialYear = now.getFullYear();
+  const initialMonth = now.getMonth();
+  const initialDay = getInitialWeekday(initialYear, initialMonth, now.getDate());
+
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [entries, setEntries] = useState<TimesheetEntry[]>([]);
+  const [timeOff, setTimeOff] = useState<TimeOffRequest[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [loadingEmployee, setLoadingEmployee] = useState(true);
+  const [loadingEntries, setLoadingEntries] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  const [year, setYear] = useState(initialYear);
+  const [month, setMonth] = useState(initialMonth);
+  const [selectedDay, setSelectedDay] = useState<number>(initialDay);
+
+  const daysInMonth = getDaysInMonth(year, month);
+  
+  const stateRef = useRef({
+    editHours: "",
+    saving: false,
+    saveError: null as string | null,
+    bulkProgress: 0,
+    dialogOpen: false,
+    configSchedule: null as WorkSchedule | null,
+    configActiveField: "morningStart" as ConfigField,
+  });
+
+  useEffect(() => {
+    setLoadingEmployee(true);
+    client.getEmployee(0)
+      .then(setEmployee)
+      .catch((err) => setError(err instanceof Error ? err.message : "Unknown error"))
+      .finally(() => setLoadingEmployee(false));
+  }, [client]);
+
+  useEffect(() => {
+    if (!employee) return;
+
+    const startDate = formatDate(year, month, 1);
+    const endDate = formatDate(year, month, daysInMonth);
+
+    setLoadingEntries(true);
+    Promise.all([
+      client.getTimesheetEntries(startDate, endDate),
+      client.getTimeOffRequests(startDate, endDate),
+      client.getHolidays(startDate, endDate),
+    ])
+      .then(([ent, off, hol]) => {
+        setEntries(ent);
+        setTimeOff(off);
+        setHolidays(hol);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Unknown error"))
+      .finally(() => setLoadingEntries(false));
+  }, [client, employee, year, month, daysInMonth]);
+
+  const navigateDay = useCallback((delta: number) => {
+    setSelectedDay((prev) => findNextWeekday(year, month, prev, delta, daysInMonth));
+  }, [year, month, daysInMonth]);
+
+  const navigateWeek = useCallback((delta: number) => {
+    setSelectedDay((prev) => {
+      let next = prev + delta * 7;
+      if (next < 1) next = Math.max(1, next + daysInMonth);
+      if (next > daysInMonth) next = Math.min(daysInMonth, next - daysInMonth);
+      while (next >= 1 && next <= daysInMonth && isWeekend(year, month, next)) {
+        next += delta > 0 ? 1 : -1;
+      }
+      if (next < 1 || next > daysInMonth) return prev;
+      return next;
+    });
+  }, [year, month, daysInMonth]);
+
+  const navigateMonth = useCallback((delta: number) => {
+    let newYear = year;
+    let newMonth = month + delta;
+    if (newMonth < 0) {
+      newYear -= 1;
+      newMonth = 11;
+    } else if (newMonth > 11) {
+      newYear += 1;
+      newMonth = 0;
+    }
+    const newDaysInMonth = getDaysInMonth(newYear, newMonth);
+    let firstWeekday = 1;
+    while (firstWeekday <= newDaysInMonth && isWeekend(newYear, newMonth, firstWeekday)) {
+      firstWeekday++;
+    }
+    setYear(newYear);
+    setMonth(newMonth);
+    setSelectedDay(firstWeekday);
+  }, [year, month]);
+
+  const refreshEntries = useCallback(() => {
+    if (!employee) return;
+    const startDate = formatDate(year, month, 1);
+    const endDate = formatDate(year, month, daysInMonth);
+    setLoadingEntries(true);
+    Promise.all([
+      client.getTimesheetEntries(startDate, endDate),
+      client.getTimeOffRequests(startDate, endDate),
+      client.getHolidays(startDate, endDate),
+    ])
+      .then(([ent, off, hol]) => {
+        setEntries(ent);
+        setTimeOff(off);
+        setHolidays(hol);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Unknown error"))
+      .finally(() => setLoadingEntries(false));
+  }, [client, employee, year, month, daysInMonth]);
+
+  const getMissingDays = useCallback((): string[] => {
+    const today = new Date();
+    const hoursByDate = new Map<string, number>();
+    for (const entry of entries) {
+      const existing = hoursByDate.get(entry.date) ?? 0;
+      hoursByDate.set(entry.date, existing + (entry.hours ?? 0));
+    }
+
+    const timeOffDates = new Set<string>();
+    for (const request of timeOff) {
+      if (request.dates) {
+        for (const dateStr of Object.keys(request.dates)) {
+          timeOffDates.add(dateStr);
+        }
+      }
+    }
+
+    const holidayDates = new Set<string>();
+    for (const holiday of holidays) {
+      const startDate = new Date(holiday.start);
+      const endDate = new Date(holiday.end);
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split("T")[0] ?? "";
+        holidayDates.add(dateStr);
+      }
+    }
+
+    const missing: string[] = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      if (isWeekend(year, month, day)) continue;
+      
+      const dateStr = formatDate(year, month, day);
+      const date = new Date(year, month, day);
+      
+      if (date > today) continue;
+      if (holidayDates.has(dateStr)) continue;
+      if (timeOffDates.has(dateStr)) continue;
+      if ((hoursByDate.get(dateStr) ?? 0) > 0) continue;
+      
+      missing.push(dateStr);
+    }
+    return missing;
+  }, [entries, timeOff, holidays, year, month, daysInMonth]);
+
+  const getDayInfo = useCallback((dateStr: string): { type: "normal" | "timeOff" | "holiday"; label?: string } => {
+    for (const holiday of holidays) {
+      const startDate = new Date(holiday.start);
+      const endDate = new Date(holiday.end);
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        if (d.toISOString().split("T")[0] === dateStr) {
+          return { type: "holiday", label: holiday.name };
+        }
+      }
+    }
+    
+    for (const request of timeOff) {
+      if (request.dates && dateStr in request.dates) {
+        return { type: "timeOff", label: request.type?.name ?? request.name ?? "Time Off" };
+      }
+    }
+    
+    return { type: "normal" };
+  }, [holidays, timeOff]);
+
+  const showDayModal = useCallback(() => {
+    if (stateRef.current.dialogOpen) return;
+    stateRef.current.dialogOpen = true;
+    
+    const dateStr = formatDate(year, month, selectedDay);
+    const dayEntries = entries.filter((e) => e.date === dateStr);
+    const dayInfo = getDayInfo(dateStr);
+    
+    dialog.show({
+      content: () => (
+        <DayModal
+          date={dateStr}
+          entries={dayEntries}
+          dayType={dayInfo.type}
+          dayLabel={dayInfo.label}
+          onClose={() => dialog.close()}
+        />
+      ),
+      closeOnEscape: true,
+      backdropOpacity: 0.6,
+      id: "day-modal",
+      onClose: () => { stateRef.current.dialogOpen = false; },
+    });
+  }, [dialog, year, month, selectedDay, entries, getDayInfo]);
+
+  const showEditModal = useCallback(() => {
+    if (stateRef.current.dialogOpen) return;
+    stateRef.current.dialogOpen = true;
+    
+    const dateStr = formatDate(year, month, selectedDay);
+    const dayInfo = getDayInfo(dateStr);
+    if (dayInfo.type !== "normal") {
+      stateRef.current.dialogOpen = false;
+      return;
+    }
+    
+    const dayEntries = entries.filter((e) => e.date === dateStr);
+    stateRef.current.editHours = "";
+    stateRef.current.saveError = null;
+    
+    let editHandlerRef: ((event: { name: string }) => void) | null = null;
+    
+    const cleanup = () => {
+      if (editHandlerRef) {
+        renderer.keyInput.off("keypress", editHandlerRef);
+        editHandlerRef = null;
+      }
+      stateRef.current.dialogOpen = false;
+      stateRef.current.saving = false;
+    };
+    
+    const updateDialog = () => {
+      dialog.show({
+        content: () => (
+          <EditModal
+            date={dateStr}
+            entries={dayEntries}
+            hours={stateRef.current.editHours}
+            saving={stateRef.current.saving}
+            error={stateRef.current.saveError}
+            onClose={() => dialog.close()}
+          />
+        ),
+        closeOnEscape: !stateRef.current.saving,
+        backdropOpacity: 0.6,
+        id: "edit-modal",
+        onClose: cleanup,
+      });
+    };
+
+    const saveHours = async () => {
+      const hours = parseFloat(stateRef.current.editHours);
+      if (isNaN(hours) || hours < 0 || hours > 24) {
+        stateRef.current.saveError = "Invalid hours (0-24)";
+        updateDialog();
+        return;
+      }
+      stateRef.current.saving = true;
+      stateRef.current.saveError = null;
+      updateDialog();
+      
+      try {
+        await client.storeHourEntry({ date: dateStr, hours });
+        refreshEntries();
+        dialog.close();
+      } catch (err) {
+        stateRef.current.saveError = err instanceof Error ? err.message : "Save failed";
+        stateRef.current.saving = false;
+        updateDialog();
+      }
+    };
+
+    const editHandler = (event: { name: string }) => {
+      if (stateRef.current.saving) return;
+      
+      if (event.name === "return") {
+        saveHours();
+        return;
+      }
+      if (event.name === "backspace") {
+        stateRef.current.editHours = stateRef.current.editHours.slice(0, -1);
+        updateDialog();
+        return;
+      }
+      if (/^[0-9.]$/.test(event.name) && stateRef.current.editHours.length < 4) {
+        stateRef.current.editHours += event.name;
+        updateDialog();
+      }
+    };
+    
+    editHandlerRef = editHandler;
+    renderer.keyInput.on("keypress", editHandler);
+    updateDialog();
+    
+  }, [dialog, renderer, client, year, month, selectedDay, entries, refreshEntries, getDayInfo]);
+
+  const showBulkModal = useCallback(() => {
+    if (stateRef.current.dialogOpen) return;
+    stateRef.current.dialogOpen = true;
+    
+    const missingDays = getMissingDays();
+    if (missingDays.length === 0) {
+      stateRef.current.dialogOpen = false;
+      return;
+    }
+    
+    stateRef.current.bulkProgress = 0;
+    stateRef.current.saveError = null;
+    stateRef.current.saving = false;
+    
+    let bulkHandlerRef: ((event: { name: string }) => void) | null = null;
+    
+    const cleanup = () => {
+      if (bulkHandlerRef) {
+        renderer.keyInput.off("keypress", bulkHandlerRef);
+        bulkHandlerRef = null;
+      }
+      stateRef.current.dialogOpen = false;
+      stateRef.current.saving = false;
+    };
+    
+    const updateDialog = () => {
+      dialog.show({
+        content: () => (
+          <BulkSubmitModal
+            missingDays={missingDays}
+            hours={8}
+            saving={stateRef.current.saving}
+            progress={stateRef.current.bulkProgress}
+            error={stateRef.current.saveError}
+          />
+        ),
+        closeOnEscape: !stateRef.current.saving,
+        backdropOpacity: 0.6,
+        id: "bulk-modal",
+        onClose: cleanup,
+      });
+    };
+
+    const bulkSubmit = async () => {
+      stateRef.current.saving = true;
+      stateRef.current.saveError = null;
+      stateRef.current.bulkProgress = 0;
+      updateDialog();
+
+      try {
+        for (let i = 0; i < missingDays.length; i++) {
+          const dateStr = missingDays[i];
+          if (!dateStr) continue;
+          await client.storeHourEntry({ date: dateStr, hours: 8 });
+          stateRef.current.bulkProgress = i + 1;
+          updateDialog();
+        }
+        refreshEntries();
+        dialog.close();
+      } catch (err) {
+        stateRef.current.saveError = err instanceof Error ? err.message : "Bulk save failed";
+        stateRef.current.saving = false;
+        updateDialog();
+      }
+    };
+
+    const bulkHandler = (event: { name: string }) => {
+      if (event.name === "return" && !stateRef.current.saving) {
+        bulkSubmit();
+      }
+    };
+    
+    bulkHandlerRef = bulkHandler;
+    renderer.keyInput.on("keypress", bulkHandler);
+    updateDialog();
+  }, [dialog, renderer, client, getMissingDays, refreshEntries]);
+
+  const showConfigModal = useCallback(() => {
+    if (stateRef.current.dialogOpen) return;
+    stateRef.current.dialogOpen = true;
+    
+    stateRef.current.configSchedule = {
+      morning: { ...settings.workSchedule.morning },
+      afternoon: { ...settings.workSchedule.afternoon },
+    };
+    stateRef.current.configActiveField = "morningStart";
+    stateRef.current.saveError = null;
+    stateRef.current.saving = false;
+    
+    let configHandlerRef: ((event: { name: string; shift?: boolean }) => void) | null = null;
+    
+    const cleanup = () => {
+      if (configHandlerRef) {
+        renderer.keyInput.off("keypress", configHandlerRef);
+        configHandlerRef = null;
+      }
+      stateRef.current.dialogOpen = false;
+      stateRef.current.saving = false;
+    };
+    
+    const updateDialog = () => {
+      if (!stateRef.current.configSchedule) return;
+      dialog.show({
+        content: () => (
+          <ConfigModal
+            schedule={stateRef.current.configSchedule!}
+            activeField={stateRef.current.configActiveField}
+            saving={stateRef.current.saving}
+            error={stateRef.current.saveError}
+          />
+        ),
+        closeOnEscape: !stateRef.current.saving,
+        backdropOpacity: 0.6,
+        id: "config-modal",
+        onClose: cleanup,
+      });
+    };
+
+    const fields: ConfigField[] = ["morningStart", "morningEnd", "afternoonStart", "afternoonEnd"];
+    
+    const getFieldValue = (field: ConfigField): string => {
+      if (!stateRef.current.configSchedule) return "";
+      switch (field) {
+        case "morningStart": return stateRef.current.configSchedule.morning.start;
+        case "morningEnd": return stateRef.current.configSchedule.morning.end;
+        case "afternoonStart": return stateRef.current.configSchedule.afternoon.start;
+        case "afternoonEnd": return stateRef.current.configSchedule.afternoon.end;
+      }
+    };
+    
+    const setFieldValue = (field: ConfigField, value: string) => {
+      if (!stateRef.current.configSchedule) return;
+      switch (field) {
+        case "morningStart":
+          stateRef.current.configSchedule.morning.start = value;
+          break;
+        case "morningEnd":
+          stateRef.current.configSchedule.morning.end = value;
+          break;
+        case "afternoonStart":
+          stateRef.current.configSchedule.afternoon.start = value;
+          break;
+        case "afternoonEnd":
+          stateRef.current.configSchedule.afternoon.end = value;
+          break;
+      }
+    };
+
+    const isValidTime = (time: string): boolean => {
+      const match = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/.exec(time);
+      return match !== null;
+    };
+
+    const saveConfig = async () => {
+      if (!stateRef.current.configSchedule) return;
+      
+      for (const field of fields) {
+        if (!isValidTime(getFieldValue(field))) {
+          stateRef.current.saveError = `Invalid time format for ${field}`;
+          updateDialog();
+          return;
+        }
+      }
+      
+      stateRef.current.saving = true;
+      stateRef.current.saveError = null;
+      updateDialog();
+      
+      try {
+        await updateSettings({
+          ...settings,
+          workSchedule: stateRef.current.configSchedule,
+        });
+        dialog.close();
+      } catch (err) {
+        stateRef.current.saveError = err instanceof Error ? err.message : "Save failed";
+        stateRef.current.saving = false;
+        updateDialog();
+      }
+    };
+
+    const configHandler = (event: { name: string; shift?: boolean }) => {
+      if (stateRef.current.saving) return;
+      
+      if (event.name === "return") {
+        saveConfig();
+        return;
+      }
+      
+      if (event.name === "tab" || event.name === "down") {
+        const currentIndex = fields.indexOf(stateRef.current.configActiveField);
+        const nextIndex = event.shift 
+          ? (currentIndex - 1 + fields.length) % fields.length
+          : (currentIndex + 1) % fields.length;
+        stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
+        updateDialog();
+        return;
+      }
+      
+      if (event.name === "up") {
+        const currentIndex = fields.indexOf(stateRef.current.configActiveField);
+        const nextIndex = (currentIndex - 1 + fields.length) % fields.length;
+        stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
+        updateDialog();
+        return;
+      }
+      
+      if (event.name === "backspace") {
+        const currentValue = getFieldValue(stateRef.current.configActiveField);
+        setFieldValue(stateRef.current.configActiveField, currentValue.slice(0, -1));
+        updateDialog();
+        return;
+      }
+      
+      if (/^[0-9:]$/.test(event.name)) {
+        const currentValue = getFieldValue(stateRef.current.configActiveField);
+        if (currentValue.length < 5) {
+          setFieldValue(stateRef.current.configActiveField, currentValue + event.name);
+          updateDialog();
+        }
+      }
+    };
+    
+    configHandlerRef = configHandler;
+    renderer.keyInput.on("keypress", configHandler);
+    updateDialog();
+  }, [dialog, renderer, settings, updateSettings]);
+
+  useEffect(() => {
+    const handler = (event: { name: string; ctrl: boolean; shift: boolean }) => {
+      if (isDialogOpen) {
+        if (event.name === "q") {
+          renderer.destroy();
+          process.exit(0);
+        }
+        return;
+      }
+      
+      switch (event.name) {
+        case "left":
+          navigateDay(-1);
+          break;
+        case "right":
+          navigateDay(1);
+          break;
+        case "up":
+          navigateWeek(-1);
+          break;
+        case "down":
+          navigateWeek(1);
+          break;
+        case "p":
+        case "[":
+          navigateMonth(-1);
+          break;
+        case "n":
+        case "]":
+          navigateMonth(1);
+          break;
+        case "return":
+          showDayModal();
+          break;
+        case "e":
+          showEditModal();
+          break;
+        case "s":
+          showBulkModal();
+          break;
+        case "c":
+          showConfigModal();
+          break;
+        case "q":
+          renderer.destroy();
+          process.exit(0);
+          break;
+      }
+    };
+
+    renderer.keyInput.on("keypress", handler);
+    return () => {
+      renderer.keyInput.off("keypress", handler);
+    };
+  }, [renderer, isDialogOpen, navigateDay, navigateWeek, navigateMonth, showDayModal, showEditModal, showBulkModal, showConfigModal]);
+
+  if (error) {
+    return (
+      <box alignItems="center" justifyContent="center" flexGrow={1}>
+        <text attributes={TextAttributes.BOLD}>Error: {error}</text>
+      </box>
+    );
+  }
+
+  return (
+    <box flexDirection="column" flexGrow={1} backgroundColor="#0f172a">
+      <box flexDirection="row" flexGrow={1}>
+        <Sidebar employee={employee} />
+
+        <box flexDirection="column" flexGrow={1} padding={1}>
+          <Calendar
+            year={year}
+            month={month}
+            entries={entries}
+            timeOff={timeOff}
+            holidays={holidays}
+            selectedDay={selectedDay}
+            loading={loadingEntries}
+          />
+        </box>
+      </box>
+
+      <StatusBar />
+    </box>
+  );
+}
+
+function Root({ client, renderer }: AppProps) {
+  return (
+    <SettingsProvider>
+      <DialogProvider 
+        size="medium" 
+        backdropOpacity={0.5}
+        dialogOptions={{ 
+          style: { backgroundColor: "#1e1e2e" }
+        }}
+      >
+        <App client={client} renderer={renderer} />
+      </DialogProvider>
+    </SettingsProvider>
+  );
+}
+
+async function main() {
+  let credentials = await loadCredentials();
+
+  if (!credentials) {
+    credentials = await setupCredentials();
+  }
+
+  const client = new BambooHRClient(credentials);
+  const renderer = await createCliRenderer();
+  createRoot(renderer).render(<Root client={client} renderer={renderer} />);
+}
+
+main().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
+});
