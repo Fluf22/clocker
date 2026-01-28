@@ -48,6 +48,7 @@ interface DayCardProps {
   day: number | null;
   hours: number;
   isSelected: boolean;
+  isToday: boolean;
   status: DayStatus;
   labelText?: string;
 }
@@ -59,13 +60,14 @@ function truncateLabel(text: string, maxLen: number): string {
   return text.slice(0, maxLen - 1) + "…";
 }
 
-function formatHoursAsTime(hours: number): string {
+function formatHoursAsDuration(hours: number): string {
   const h = Math.floor(hours);
   const m = Math.round((hours - h) * 60);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  if (m === 0) return `${h}h`;
+  return `${h}h${m}m`;
 }
 
-function DayCard({ day, hours, isSelected, status, labelText }: DayCardProps) {
+function DayCard({ day, hours, isSelected, isToday, status, labelText }: DayCardProps) {
   if (day === null) {
     return (
       <box
@@ -86,8 +88,8 @@ function DayCard({ day, hours, isSelected, status, labelText }: DayCardProps) {
   }
 
   const dayStr = String(day);
-  const timeStr = hours > 0 ? formatHoursAsTime(hours) : "";
-  const dot = isSelected ? "*" : "";
+  const timeStr = hours > 0 ? formatHoursAsDuration(hours) : "";
+  const star = isToday ? "*" : "";
 
   let borderColor = COLORS.border;
   if (isSelected) {
@@ -112,6 +114,7 @@ function DayCard({ day, hours, isSelected, status, labelText }: DayCardProps) {
 
   let contentText = "";
   let contentAttr = TextAttributes.DIM;
+  let secondaryText = "";
 
   if (status === "hasHours") {
     contentText = timeStr;
@@ -119,6 +122,9 @@ function DayCard({ day, hours, isSelected, status, labelText }: DayCardProps) {
   } else if (status === "holiday") {
     contentText = truncateLabel(labelText ?? "Hol", DAY_CARD_CONTENT_WIDTH);
     contentAttr = TextAttributes.BOLD;
+    if (hours > 0) {
+      secondaryText = timeStr;
+    }
   } else if (status === "timeOff") {
     contentText = truncateLabel(labelText ?? "PTO", DAY_CARD_CONTENT_WIDTH);
     contentAttr = 0;
@@ -141,10 +147,11 @@ function DayCard({ day, hours, isSelected, status, labelText }: DayCardProps) {
     >
       <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1}>
         <text attributes={dayAttr}>{dayStr}</text>
-        <text attributes={TextAttributes.BOLD}>{dot}</text>
+        <text attributes={TextAttributes.BOLD}>{star}</text>
       </box>
-      <box flexGrow={1} alignItems="center" justifyContent="center">
+      <box flexGrow={1} flexDirection="column" alignItems="center" justifyContent="center">
         <text attributes={contentAttr}>{contentText}</text>
+        {secondaryText && <text attributes={TextAttributes.DIM}>{secondaryText}</text>}
       </box>
     </box>
   );
@@ -171,13 +178,15 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
     }
   }
 
-  const holidayByDate = new Map<string, string>();
+  const holidayByDate = new Map<string, string[]>();
   for (const holiday of holidays) {
     const startDate = new Date(holiday.start);
     const endDate = new Date(holiday.end);
     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split("T")[0] ?? "";
-      holidayByDate.set(dateStr, holiday.name);
+      const existing = holidayByDate.get(dateStr) ?? [];
+      existing.push(holiday.name);
+      holidayByDate.set(dateStr, existing);
     }
   }
 
@@ -210,7 +219,7 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
     const dateStr = formatDate(year, month, day);
     const date = new Date(year, month, day);
     
-    if (holidayByDate.has(dateStr)) return "holiday";
+    if ((holidayByDate.get(dateStr)?.length ?? 0) > 0) return "holiday";
     if (timeOffByDate.has(dateStr)) return "timeOff";
     
     const hours = hoursByDate.get(dateStr) ?? 0;
@@ -221,8 +230,19 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
     return "missing";
   }
 
+  function getHolidaysForDate(dateStr: string): string[] {
+    return holidayByDate.get(dateStr) ?? [];
+  }
+
   function getLabelForDate(dateStr: string): string | undefined {
-    return holidayByDate.get(dateStr) ?? timeOffByDate.get(dateStr);
+    const holidays = getHolidaysForDate(dateStr);
+    if (holidays.length > 1) {
+      return `${holidays.length} holidays`;
+    }
+    if (holidays.length === 1) {
+      return holidays[0];
+    }
+    return timeOffByDate.get(dateStr);
   }
 
   if (loading) {
@@ -240,10 +260,19 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      <box justifyContent="center" marginBottom={1}>
-        <box borderStyle="rounded" borderColor="#67e8f9" paddingLeft={2} paddingRight={2}>
-          <text attributes={TextAttributes.BOLD}>{`${monthName} ${year}`}</text>
-        </box>
+      <box 
+        flexDirection="row" 
+        justifyContent="space-between" 
+        alignItems="center" 
+        marginBottom={1}
+        borderStyle="rounded" 
+        borderColor="#67e8f9" 
+        paddingLeft={1} 
+        paddingRight={1}
+      >
+        <text attributes={TextAttributes.DIM}>{"<"}</text>
+        <text attributes={TextAttributes.BOLD}>{`${monthName} ${year}`}</text>
+        <text attributes={TextAttributes.DIM}>{">"}</text>
       </box>
 
       <box flexDirection="row" height={1}>
@@ -261,6 +290,10 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
               const dateStr = day ? formatDate(year, month, day) : "";
               const hours = day ? (hoursByDate.get(dateStr) ?? 0) : 0;
               const isSelected = day === selectedDay;
+              const isToday = day !== null && 
+                year === today.getFullYear() && 
+                month === today.getMonth() && 
+                day === today.getDate();
               const status = day ? getDayStatus(day, dayIndex) : "weekend";
               const labelText = day ? getLabelForDate(dateStr) : undefined;
 
@@ -270,6 +303,7 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
                   day={day}
                   hours={hours}
                   isSelected={isSelected}
+                  isToday={isToday}
                   status={status}
                   labelText={labelText}
                 />
@@ -279,13 +313,27 @@ export function Calendar({ year, month, entries, timeOff, holidays, selectedDay,
         ))}
       </box>
 
-      <box flexDirection="row" justifyContent="center" gap={2} marginTop={1}>
-        <box>
-          <text attributes={TextAttributes.BOLD}>!</text>
-          <text attributes={TextAttributes.DIM}> Missing</text>
+      <box flexDirection="row" justifyContent="space-around" marginTop={1}>
+        <box flexDirection="row" gap={1}>
+          <text attributes={TextAttributes.BOLD}>*</text>
+          <text attributes={TextAttributes.DIM}>Today</text>
         </box>
-        <text attributes={TextAttributes.DIM}>PTO = Time Off</text>
-        <text attributes={TextAttributes.DIM}>Hol = Holiday</text>
+        <box flexDirection="row" gap={1}>
+          <box backgroundColor={COLORS.missing} width={2}><text> </text></box>
+          <text attributes={TextAttributes.DIM}>Missing</text>
+        </box>
+        <box flexDirection="row" gap={1}>
+          <box backgroundColor={COLORS.hasHours} width={2}><text> </text></box>
+          <text attributes={TextAttributes.DIM}>Logged</text>
+        </box>
+        <box flexDirection="row" gap={1}>
+          <box backgroundColor={COLORS.timeOff} width={2}><text> </text></box>
+          <text attributes={TextAttributes.DIM}>Time Off</text>
+        </box>
+        <box flexDirection="row" gap={1}>
+          <box backgroundColor={COLORS.holiday} width={2}><text> </text></box>
+          <text attributes={TextAttributes.DIM}>Holiday</text>
+        </box>
       </box>
     </box>
   );

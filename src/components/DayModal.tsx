@@ -6,14 +6,16 @@ interface DayModalProps {
   entries: TimesheetEntry[];
   dayType: "normal" | "timeOff" | "holiday";
   dayLabel?: string;
+  holidayNames?: string[];
   onClose: () => void;
 }
 
-function formatHoursAsTime(hours: number | undefined): string {
+function formatHoursAsDuration(hours: number | undefined): string {
   if (hours === undefined || hours === 0) return "-";
   const h = Math.floor(hours);
   const m = Math.round((hours - h) * 60);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  if (m === 0) return `${h}h`;
+  return `${h}h${m}m`;
 }
 
 function formatTime(isoString: string | undefined): string {
@@ -26,7 +28,7 @@ function EntryRow({ entry }: { entry: TimesheetEntry }) {
   if (entry.type === "hour") {
     return (
       <box>
-        <text>  {formatHoursAsTime(entry.hours)} </text>
+        <text>  {formatHoursAsDuration(entry.hours)} </text>
         {entry.projectInfo && (
           <text attributes={TextAttributes.DIM}>({entry.projectInfo.name})</text>
         )}
@@ -47,7 +49,7 @@ function EntryRow({ entry }: { entry: TimesheetEntry }) {
   );
 }
 
-export function DayModal({ date, entries, dayType, dayLabel, onClose }: DayModalProps) {
+export function DayModal({ date, entries, dayType, dayLabel, holidayNames, onClose }: DayModalProps) {
   const displayDate = new Date(date).toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -56,7 +58,7 @@ export function DayModal({ date, entries, dayType, dayLabel, onClose }: DayModal
   });
 
   const totalHours = entries.reduce((sum, e) => sum + (e.hours ?? 0), 0);
-  const isEditable = dayType === "normal";
+  const isEditable = dayType !== "timeOff";
 
   return (
     <box
@@ -68,9 +70,26 @@ export function DayModal({ date, entries, dayType, dayLabel, onClose }: DayModal
         <text attributes={TextAttributes.BOLD}>{displayDate}</text>
       </box>
 
-      {dayType === "holiday" && (
-        <box justifyContent="center" marginBottom={1}>
-          <text attributes={TextAttributes.BOLD}>{dayLabel ?? "Holiday"}</text>
+      {dayType === "holiday" && holidayNames && holidayNames.length > 0 && (
+        <box flexDirection="column" marginBottom={1}>
+          <text attributes={TextAttributes.DIM}>
+            {holidayNames.length === 1 ? "Holiday:" : "Holidays:"}
+          </text>
+          {holidayNames.map((name, idx) => (
+            <text key={idx} attributes={TextAttributes.BOLD}>  {name}</text>
+          ))}
+        </box>
+      )}
+
+      {dayType === "holiday" && entries.length > 0 && (
+        <box flexDirection="column" marginBottom={1}>
+          <text attributes={TextAttributes.DIM}>Time entries:</text>
+          {entries.map((entry) => (
+            <EntryRow key={entry.id} entry={entry} />
+          ))}
+          <box marginTop={1}>
+            <text attributes={TextAttributes.BOLD}>{`Total: ${formatHoursAsDuration(totalHours)}`}</text>
+          </box>
         </box>
       )}
 
@@ -91,7 +110,7 @@ export function DayModal({ date, entries, dayType, dayLabel, onClose }: DayModal
             <EntryRow key={entry.id} entry={entry} />
           ))}
           <box marginTop={1}>
-            <text attributes={TextAttributes.BOLD}>{`Total: ${formatHoursAsTime(totalHours)}`}</text>
+            <text attributes={TextAttributes.BOLD}>{`Total: ${formatHoursAsDuration(totalHours)}`}</text>
           </box>
         </box>
       )}

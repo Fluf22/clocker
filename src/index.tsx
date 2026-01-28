@@ -200,6 +200,8 @@ function App({ client, renderer }: AppProps) {
     configActiveField: "morningStart" as ConfigField,
     configCursorPosition: 0,
   });
+  
+  const showEditModalRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     setLoadingEmployee(true);
@@ -257,6 +259,11 @@ function App({ client, renderer }: AppProps) {
       newYear += 1;
       newMonth = 0;
     }
+    
+    if (newYear < 2026 || (newYear === 2026 && newMonth < 0)) {
+      return;
+    }
+    
     const newDaysInMonth = getDaysInMonth(newYear, newMonth);
     let firstWeekday = 1;
     while (firstWeekday <= newDaysInMonth && isWeekend(newYear, newMonth, firstWeekday)) {
@@ -330,15 +337,20 @@ function App({ client, renderer }: AppProps) {
     return missing;
   }, [entries, timeOff, holidays, year, month, daysInMonth]);
 
-  const getDayInfo = useCallback((dateStr: string): { type: "normal" | "timeOff" | "holiday"; label?: string } => {
+  const getDayInfo = useCallback((dateStr: string): { type: "normal" | "timeOff" | "holiday"; label?: string; holidayNames?: string[] } => {
+    const holidayNames: string[] = [];
     for (const holiday of holidays) {
       const startDate = new Date(holiday.start);
       const endDate = new Date(holiday.end);
       for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
         if (d.toISOString().split("T")[0] === dateStr) {
-          return { type: "holiday", label: holiday.name };
+          holidayNames.push(holiday.name);
         }
       }
+    }
+    
+    if (holidayNames.length > 0) {
+      return { type: "holiday", holidayNames };
     }
     
     for (const request of timeOff) {
@@ -358,6 +370,33 @@ function App({ client, renderer }: AppProps) {
     const dayEntries = entries.filter((e) => e.date === dateStr);
     const dayInfo = getDayInfo(dateStr);
     
+    let dayModalHandlerRef: ((event: { name: string }) => void) | null = null;
+    let openEditAfterClose = false;
+    
+    const cleanup = () => {
+      if (dayModalHandlerRef) {
+        renderer.keyInput.off("keypress", dayModalHandlerRef);
+        dayModalHandlerRef = null;
+      }
+      stateRef.current.dialogOpen = false;
+      
+      if (openEditAfterClose && dayInfo.type !== "timeOff") {
+        setTimeout(() => showEditModalRef.current?.(), 0);
+      }
+    };
+    
+    const dayModalHandler = (event: { name: string }) => {
+      if (event.name === "return") {
+        dialog.close();
+      } else if (event.name === "e" && dayInfo.type !== "timeOff") {
+        openEditAfterClose = true;
+        dialog.close();
+      }
+    };
+    
+    dayModalHandlerRef = dayModalHandler;
+    renderer.keyInput.on("keypress", dayModalHandler);
+    
     dialog.show({
       content: () => (
         <DayModal
@@ -365,15 +404,16 @@ function App({ client, renderer }: AppProps) {
           entries={dayEntries}
           dayType={dayInfo.type}
           dayLabel={dayInfo.label}
+          holidayNames={dayInfo.holidayNames}
           onClose={() => dialog.close()}
         />
       ),
       closeOnEscape: true,
       backdropOpacity: 0.6,
       id: "day-modal",
-      onClose: () => { stateRef.current.dialogOpen = false; },
+      onClose: cleanup,
     });
-  }, [dialog, year, month, selectedDay, entries, getDayInfo]);
+  }, [dialog, renderer, year, month, selectedDay, entries, getDayInfo]);
 
   const showEditModal = useCallback(() => {
     if (stateRef.current.dialogOpen) return;
@@ -381,7 +421,7 @@ function App({ client, renderer }: AppProps) {
     
     const dateStr = formatDate(year, month, selectedDay);
     const dayInfo = getDayInfo(dateStr);
-    if (dayInfo.type !== "normal") {
+    if (dayInfo.type === "timeOff") {
       stateRef.current.dialogOpen = false;
       return;
     }
@@ -465,6 +505,8 @@ function App({ client, renderer }: AppProps) {
     updateDialog();
     
   }, [dialog, renderer, client, year, month, selectedDay, entries, refreshEntries, getDayInfo]);
+
+  showEditModalRef.current = showEditModal;
 
   const showBulkModal = useCallback(() => {
     if (stateRef.current.dialogOpen) return;
