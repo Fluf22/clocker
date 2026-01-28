@@ -199,7 +199,6 @@ function App({ client, renderer }: AppProps) {
     configSchedule: null as WorkSchedule | null,
     configActiveField: "morningStart" as ConfigField,
     configCursorPosition: 0,
-    configBlinkOn: true,
   });
 
   useEffect(() => {
@@ -554,21 +553,15 @@ function App({ client, renderer }: AppProps) {
     };
     stateRef.current.configActiveField = "morningStart";
     stateRef.current.configCursorPosition = 0;
-    stateRef.current.configBlinkOn = true;
     stateRef.current.saveError = null;
     stateRef.current.saving = false;
     
     let configHandlerRef: ((event: { name: string; shift?: boolean }) => void) | null = null;
-    let blinkIntervalRef: ReturnType<typeof setInterval> | null = null;
     
     const cleanup = () => {
       if (configHandlerRef) {
         renderer.keyInput.off("keypress", configHandlerRef);
         configHandlerRef = null;
-      }
-      if (blinkIntervalRef) {
-        clearInterval(blinkIntervalRef);
-        blinkIntervalRef = null;
       }
       stateRef.current.dialogOpen = false;
       stateRef.current.saving = false;
@@ -582,7 +575,6 @@ function App({ client, renderer }: AppProps) {
             schedule={stateRef.current.configSchedule!}
             activeField={stateRef.current.configActiveField}
             cursorPosition={stateRef.current.configCursorPosition}
-            blinkOn={stateRef.current.configBlinkOn}
             saving={stateRef.current.saving}
             error={stateRef.current.saveError}
           />
@@ -593,11 +585,6 @@ function App({ client, renderer }: AppProps) {
         onClose: cleanup,
       });
     };
-
-    blinkIntervalRef = setInterval(() => {
-      stateRef.current.configBlinkOn = !stateRef.current.configBlinkOn;
-      updateDialog();
-    }, 500);
 
     const fields: ConfigField[] = ["morningStart", "morningEnd", "afternoonStart", "afternoonEnd"];
     
@@ -664,21 +651,18 @@ function App({ client, renderer }: AppProps) {
           : (currentIndex + 1) % fields.length;
         stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
         stateRef.current.configCursorPosition = 0;
-        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
       }
       
       if (event.name === "left") {
         stateRef.current.configCursorPosition = Math.max(0, stateRef.current.configCursorPosition - 1);
-        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
       }
       
       if (event.name === "right") {
         stateRef.current.configCursorPosition = Math.min(3, stateRef.current.configCursorPosition + 1);
-        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
       }
@@ -687,7 +671,6 @@ function App({ client, renderer }: AppProps) {
         const currentValue = getFieldValue(stateRef.current.configActiveField);
         const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, 1);
         setFieldValue(stateRef.current.configActiveField, newValue);
-        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
       }
@@ -696,7 +679,6 @@ function App({ client, renderer }: AppProps) {
         const currentValue = getFieldValue(stateRef.current.configActiveField);
         const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, -1);
         setFieldValue(stateRef.current.configActiveField, newValue);
-        stateRef.current.configBlinkOn = true;
         updateDialog();
         return;
       }
