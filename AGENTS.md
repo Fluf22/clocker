@@ -1,10 +1,10 @@
-# AGENTS.md - Clocker TUI
+# AGENTS.md - Clocker
 
 > Guidelines for AI agents working in this codebase.
 
 ## Project Overview
 
-**clocker-tui** is a Terminal User Interface for submitting monthly work timesheets to BambooHR.
+**clocker** is a Terminal User Interface for submitting monthly work timesheets to BambooHR.
 
 ### Purpose
 - User-friendly terminal interface for timesheet management

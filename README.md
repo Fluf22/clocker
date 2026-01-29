@@ -4,14 +4,36 @@ Terminal User Interface for submitting monthly work timesheets to BambooHR.
 
 ## Installation
 
+### Quick Install (Recommended)
+
 ```bash
+curl -fsSL https://raw.githubusercontent.com/Fluf22/clocker/main/install.sh | sh
+```
+
+This downloads the pre-built binary for your platform and installs it to `~/.clocker/bin`.
+
+### From Source
+
+Requires [Bun](https://bun.sh/).
+
+```bash
+git clone https://github.com/Fluf22/clocker.git
+cd clocker
 bun install
+bun dev
+```
+
+### Build Standalone Binary
+
+```bash
+bun run build
+./clocker
 ```
 
 ## Usage
 
 ```bash
-bun dev
+clocker
 ```
 
 ### Keyboard Shortcuts
@@ -45,7 +67,7 @@ Your app password is stored locally in `~/.config/clocker/gmail.json`.
 ### Submit & Schedule Reminder
 
 ```bash
-bun run src/index.tsx --submit
+clocker --submit
 ```
 
 This command:
