@@ -39,13 +39,16 @@ jobs:
         run: bun install
 
       - name: Build binary
-        run: bun build --compile --target=${{ matrix.target }} --outfile=${{ matrix.artifact }} src/index.tsx
+        run: bun build --compile --minify --target=${{ matrix.target }} --outfile=${{ matrix.artifact }} src/index.tsx
+
+      - name: Compress binary
+        run: gzip -9 ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: ${{ matrix.artifact }}.gz
+          path: ${{ matrix.artifact }}.gz
 
   release:
     needs: build

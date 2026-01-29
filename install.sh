@@ -80,19 +80,19 @@ get_latest_version() {
 
 # Download and install binary
 install_binary() {
-	DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/clocker-${PLATFORM}"
+	DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/clocker-${PLATFORM}.gz"
 
 	info "Downloading from: $DOWNLOAD_URL"
 
-	# Create install directory
 	mkdir -p "$INSTALL_DIR"
 
-	# Download binary
-	if ! curl -fsSL "$DOWNLOAD_URL" -o "${INSTALL_DIR}/${BINARY_NAME}"; then
+	if ! curl -fsSL "$DOWNLOAD_URL" -o "${INSTALL_DIR}/${BINARY_NAME}.gz"; then
 		error "Failed to download binary. The release may not exist for your platform."
 	fi
 
-	# Make executable
+	info "Decompressing..."
+	gunzip -f "${INSTALL_DIR}/${BINARY_NAME}.gz"
+
 	chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
 	success "Installed clocker to ${INSTALL_DIR}/${BINARY_NAME}"
