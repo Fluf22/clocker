@@ -5,6 +5,7 @@ node_modules
 out
 dist
 *.tgz
+clocker
 
 # code coverage
 coverage
