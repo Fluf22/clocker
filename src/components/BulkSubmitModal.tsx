@@ -6,11 +6,13 @@ interface BulkSubmitModalProps {
   saving: boolean;
   progress: number;
   error: string | null;
+  isFutureMonth: boolean;
 }
 
 const COLORS = {
   border: "#86efac",
   error: "#f87171",
+  warning: "#fbbf24",
 };
 
 function formatHours(hours: number): string {
@@ -20,7 +22,7 @@ function formatHours(hours: number): string {
   return `${h}h${m}m`;
 }
 
-export function BulkSubmitModal({ missingDays, hours, saving, progress, error }: BulkSubmitModalProps) {
+export function BulkSubmitModal({ missingDays, hours, saving, progress, error, isFutureMonth }: BulkSubmitModalProps) {
   const totalHours = missingDays.length * hours;
   const hasMissingDays = missingDays.length > 0;
 
@@ -29,7 +31,7 @@ export function BulkSubmitModal({ missingDays, hours, saving, progress, error }:
       flexDirection="column"
       padding={1}
       borderStyle="rounded"
-      borderColor={COLORS.border}
+      borderColor={isFutureMonth ? COLORS.warning : COLORS.border}
     >
       <box justifyContent="center" marginBottom={1}>
         <text attributes={TextAttributes.BOLD}>Bulk Submit Hours</text>
@@ -41,7 +43,19 @@ export function BulkSubmitModal({ missingDays, hours, saving, progress, error }:
         </box>
       )}
 
-      {hasMissingDays ? (
+      {isFutureMonth ? (
+        <>
+          <box justifyContent="center" marginBottom={1}>
+            <text>Timesheet not open yet</text>
+          </box>
+          <box justifyContent="center" marginBottom={1}>
+            <text attributes={TextAttributes.DIM}>This month's timesheet is not available for submission.</text>
+          </box>
+          <box justifyContent="center">
+            <text attributes={TextAttributes.DIM}>[Esc] Close</text>
+          </box>
+        </>
+      ) : hasMissingDays ? (
         <>
           <box justifyContent="center" marginBottom={1}>
             <text>{`${missingDays.length} missing days found`}</text>

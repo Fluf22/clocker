@@ -354,7 +354,6 @@ function App({ client, renderer }: AppProps) {
   }, [client, employee, year, month, daysInMonth]);
 
   const getMissingDays = useCallback((): string[] => {
-    const today = new Date();
     const hoursByDate = new Map<string, number>();
     for (const entry of entries) {
       const existing = hoursByDate.get(entry.date) ?? 0;
@@ -385,9 +384,7 @@ function App({ client, renderer }: AppProps) {
       if (isWeekend(year, month, day)) continue;
       
       const dateStr = formatDate(year, month, day);
-      const date = new Date(year, month, day);
       
-      if (date > today) continue;
       if (holidayDates.has(dateStr)) continue;
       if (timeOffDates.has(dateStr)) continue;
       if ((hoursByDate.get(dateStr) ?? 0) > 0) continue;
@@ -477,14 +474,20 @@ function App({ client, renderer }: AppProps) {
 
   const showEditModal = useCallback(() => {
     if (stateRef.current.dialogOpen) return;
-    stateRef.current.dialogOpen = true;
     
     const dateStr = formatDate(year, month, selectedDay);
     const dayInfo = getDayInfo(dateStr);
-    if (dayInfo.type === "timeOff") {
-      stateRef.current.dialogOpen = false;
+    if (dayInfo.type === "timeOff" || dayInfo.type === "holiday") {
+      showDayModal();
       return;
     }
+    
+    stateRef.current.dialogOpen = true;
+    
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const isFutureMonth = year > currentYear || (year === currentYear && month > currentMonth);
     
     const dayEntries = entries.filter((e) => e.date === dateStr);
     stateRef.current.editSchedule = extractScheduleFromEntries(dayEntries, settings.workSchedule);
@@ -515,6 +518,7 @@ function App({ client, renderer }: AppProps) {
             cursorPosition={stateRef.current.editCursorPosition}
             saving={stateRef.current.saving}
             error={stateRef.current.saveError}
+            isFutureMonth={isFutureMonth}
           />
         ),
         closeOnEscape: !stateRef.current.saving,
@@ -592,6 +596,7 @@ function App({ client, renderer }: AppProps) {
 
     const editHandler = (event: { name: string; shift?: boolean }) => {
       if (stateRef.current.saving) return;
+      if (isFutureMonth) return;
       
       if (event.name === "return") {
         saveClockEntries();
@@ -642,13 +647,18 @@ function App({ client, renderer }: AppProps) {
     renderer.keyInput.on("keypress", editHandler);
     updateDialog();
     
-  }, [dialog, renderer, client, year, month, selectedDay, settings, refreshEntries, getDayInfo]);
+  }, [dialog, renderer, client, year, month, selectedDay, settings, refreshEntries, getDayInfo, entries, showDayModal]);
 
   showEditModalRef.current = showEditModal;
 
   const showBulkModal = useCallback(() => {
     if (stateRef.current.dialogOpen) return;
     stateRef.current.dialogOpen = true;
+    
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const isFutureMonth = year > currentYear || (year === currentYear && month > currentMonth);
     
     const missingDays = getMissingDays();
     const hoursPerDay = getScheduleHours(settings.workSchedule);
@@ -677,6 +687,7 @@ function App({ client, renderer }: AppProps) {
             saving={stateRef.current.saving}
             progress={stateRef.current.bulkProgress}
             error={stateRef.current.saveError}
+            isFutureMonth={isFutureMonth}
           />
         ),
         closeOnEscape: !stateRef.current.saving,
@@ -723,7 +734,7 @@ function App({ client, renderer }: AppProps) {
     };
 
     const bulkHandler = (event: { name: string }) => {
-      if (event.name === "return" && !stateRef.current.saving && missingDays.length > 0) {
+      if (event.name === "return" && !stateRef.current.saving && missingDays.length > 0 && !isFutureMonth) {
         bulkSubmit();
       }
     };
@@ -731,7 +742,7 @@ function App({ client, renderer }: AppProps) {
     bulkHandlerRef = bulkHandler;
     renderer.keyInput.on("keypress", bulkHandler);
     updateDialog();
-  }, [dialog, renderer, client, settings, getMissingDays, refreshEntries]);
+  }, [dialog, renderer, client, settings, getMissingDays, refreshEntries, year, month]);
 
   const showConfigModal = useCallback(async () => {
     if (stateRef.current.dialogOpen) return;

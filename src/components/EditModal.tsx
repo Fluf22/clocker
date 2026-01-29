@@ -11,6 +11,7 @@ interface EditModalProps {
   cursorPosition: number;
   saving: boolean;
   error: string | null;
+  isFutureMonth: boolean;
 }
 
 const COLORS = {
@@ -19,6 +20,7 @@ const COLORS = {
   inactive: "#64748b",
   error: "#f87171",
   cursor: "#fbbf24",
+  warning: "#fbbf24",
 };
 
 function padTime(value: string): string {
@@ -108,7 +110,7 @@ function formatTotalHours(hours: number): string {
   return `${h}h${m}m`;
 }
 
-export function EditModal({ date, schedule, activeField, cursorPosition, saving, error }: EditModalProps) {
+export function EditModal({ date, schedule, activeField, cursorPosition, saving, error, isFutureMonth }: EditModalProps) {
   const displayDate = new Date(date).toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -123,7 +125,7 @@ export function EditModal({ date, schedule, activeField, cursorPosition, saving,
       flexDirection="column"
       padding={1}
       borderStyle="rounded"
-      borderColor={COLORS.border}
+      borderColor={isFutureMonth ? COLORS.warning : COLORS.border}
       minWidth={40}
     >
       <box justifyContent="center" marginBottom={1}>
@@ -136,56 +138,72 @@ export function EditModal({ date, schedule, activeField, cursorPosition, saving,
         </box>
       )}
 
-      <box flexDirection="column" gap={1} marginBottom={1}>
-        <box marginBottom={1}>
-          <text attributes={TextAttributes.DIM}>Morning</text>
-        </box>
-        <TimeField
-          label="  Start"
-          value={schedule.morning.start}
-          isActive={activeField === "morningStart"}
-          cursorPosition={cursorPosition}
-        />
-        <TimeField
-          label="  End"
-          value={schedule.morning.end}
-          isActive={activeField === "morningEnd"}
-          cursorPosition={cursorPosition}
-        />
-      </box>
-
-      <box flexDirection="column" gap={1} marginBottom={1}>
-        <box marginBottom={1}>
-          <text attributes={TextAttributes.DIM}>Afternoon</text>
-        </box>
-        <TimeField
-          label="  Start"
-          value={schedule.afternoon.start}
-          isActive={activeField === "afternoonStart"}
-          cursorPosition={cursorPosition}
-        />
-        <TimeField
-          label="  End"
-          value={schedule.afternoon.end}
-          isActive={activeField === "afternoonEnd"}
-          cursorPosition={cursorPosition}
-        />
-      </box>
-
-      <box justifyContent="center" marginBottom={1}>
-        <text attributes={TextAttributes.BOLD}>{`Total: ${formatTotalHours(totalHours)}`}</text>
-      </box>
-
-      {saving ? (
-        <box justifyContent="center">
-          <text attributes={TextAttributes.DIM}>Saving...</text>
-        </box>
+      {isFutureMonth ? (
+        <>
+          <box justifyContent="center" marginBottom={1}>
+            <text>Timesheet not open yet</text>
+          </box>
+          <box justifyContent="center" marginBottom={1}>
+            <text attributes={TextAttributes.DIM}>This month's timesheet is not available for editing.</text>
+          </box>
+          <box justifyContent="center">
+            <text attributes={TextAttributes.DIM}>[Esc] Close</text>
+          </box>
+        </>
       ) : (
-        <box justifyContent="center" gap={2}>
-          <text attributes={TextAttributes.DIM}>[Arrows] Edit</text>
-          <text attributes={TextAttributes.DIM}>[Tab] Next</text>
-          <text attributes={TextAttributes.DIM}>[Enter] Save</text>
-        </box>
+        <>
+          <box flexDirection="column" gap={1} marginBottom={1}>
+            <box marginBottom={1}>
+              <text attributes={TextAttributes.DIM}>Morning</text>
+            </box>
+            <TimeField
+              label="  Start"
+              value={schedule.morning.start}
+              isActive={activeField === "morningStart"}
+              cursorPosition={cursorPosition}
+            />
+            <TimeField
+              label="  End"
+              value={schedule.morning.end}
+              isActive={activeField === "morningEnd"}
+              cursorPosition={cursorPosition}
+            />
+          </box>
+
+          <box flexDirection="column" gap={1} marginBottom={1}>
+            <box marginBottom={1}>
+              <text attributes={TextAttributes.DIM}>Afternoon</text>
+            </box>
+            <TimeField
+              label="  Start"
+              value={schedule.afternoon.start}
+              isActive={activeField === "afternoonStart"}
+              cursorPosition={cursorPosition}
+            />
+            <TimeField
+              label="  End"
+              value={schedule.afternoon.end}
+              isActive={activeField === "afternoonEnd"}
+              cursorPosition={cursorPosition}
+            />
+          </box>
+
+          <box justifyContent="center" marginBottom={1}>
+            <text attributes={TextAttributes.BOLD}>{`Total: ${formatTotalHours(totalHours)}`}</text>
+          </box>
+
+          {saving ? (
+            <box justifyContent="center">
+              <text attributes={TextAttributes.DIM}>Saving...</text>
+            </box>
+          ) : (
+            <box justifyContent="center" gap={2}>
+              <text attributes={TextAttributes.DIM}>[Arrows] Edit</text>
+              <text attributes={TextAttributes.DIM}>[Tab] Next</text>
+              <text attributes={TextAttributes.DIM}>[Enter] Save</text>
+            </box>
+          )}
+        </>
       )}
     </box>
   );
