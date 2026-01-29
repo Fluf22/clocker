@@ -1,5 +1,5 @@
 import { TextAttributes } from "@opentui/core";
-import { useState, useEffect, memo } from "react";
+import { memo } from "react";
 import type { WorkSchedule } from "../types/index.ts";
 
 export type EditField = "morningStart" | "morningEnd" | "afternoonStart" | "afternoonEnd";
@@ -28,22 +28,13 @@ function padTime(value: string): string {
   return `${hours}:${minutes}`;
 }
 
-function BlinkingCursor({ char }: { char: string }) {
-  const [blinkOn, setBlinkOn] = useState(true);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setBlinkOn((prev) => !prev);
-    }, 500);
-    return () => clearInterval(interval);
-  }, []);
-
+const BlinkingCursor = memo(function BlinkingCursor({ char }: { char: string }) {
   return (
-    <box backgroundColor={blinkOn ? COLORS.cursor : undefined}>
-      <text attributes={TextAttributes.BOLD}>{char}</text>
+    <box backgroundColor={COLORS.cursor}>
+      <text attributes={TextAttributes.BOLD | TextAttributes.BLINK}>{char}</text>
     </box>
   );
-}
+});
 
 const TimeDigit = memo(function TimeDigit({ char, isBold }: { char: string; isBold: boolean }) {
   return <text attributes={isBold ? TextAttributes.BOLD : 0}>{char}</text>;

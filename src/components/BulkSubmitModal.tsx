@@ -22,6 +22,7 @@ function formatHours(hours: number): string {
 
 export function BulkSubmitModal({ missingDays, hours, saving, progress, error }: BulkSubmitModalProps) {
   const totalHours = missingDays.length * hours;
+  const hasMissingDays = missingDays.length > 0;
 
   return (
     <box
@@ -40,26 +41,39 @@ export function BulkSubmitModal({ missingDays, hours, saving, progress, error }:
         </box>
       )}
 
-      <box justifyContent="center" marginBottom={1}>
-        <text>{`${missingDays.length} missing days found`}</text>
-      </box>
-
-      <box justifyContent="center" marginBottom={1}>
-        <text attributes={TextAttributes.DIM}>{`Will submit ${formatHours(hours)} for each (${formatHours(totalHours)} total)`}</text>
-      </box>
-
-      {saving ? (
-        <box flexDirection="column" alignItems="center">
-          <text>{`Submitting... ${progress}/${missingDays.length}`}</text>
-          <box marginTop={1}>
-            <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
+      {hasMissingDays ? (
+        <>
+          <box justifyContent="center" marginBottom={1}>
+            <text>{`${missingDays.length} missing days found`}</text>
           </box>
-        </box>
+
+          <box justifyContent="center" marginBottom={1}>
+            <text attributes={TextAttributes.DIM}>{`Will submit ${formatHours(hours)} for each (${formatHours(totalHours)} total)`}</text>
+          </box>
+
+          {saving ? (
+            <box flexDirection="column" alignItems="center">
+              <text>{`Submitting... ${progress}/${missingDays.length}`}</text>
+              <box marginTop={1}>
+                <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
+              </box>
+            </box>
+          ) : (
+            <box justifyContent="center" gap={2}>
+              <text attributes={TextAttributes.DIM}>[Enter] Submit All</text>
+              <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
+            </box>
+          )}
+        </>
       ) : (
-        <box justifyContent="center" gap={2}>
-          <text attributes={TextAttributes.DIM}>[Enter] Submit All</text>
-          <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
-        </box>
+        <>
+          <box justifyContent="center" marginBottom={1}>
+            <text>All days have been submitted!</text>
+          </box>
+          <box justifyContent="center">
+            <text attributes={TextAttributes.DIM}>[Esc] Close</text>
+          </box>
+        </>
       )}
     </box>
   );

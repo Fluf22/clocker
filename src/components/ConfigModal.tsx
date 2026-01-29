@@ -1,16 +1,33 @@
-import { TextAttributes } from "@opentui/core";
-import { useState, useEffect, memo } from "react";
+import { TextAttributes, type InputRenderable } from "@opentui/core";
+import { memo, useCallback } from "react";
 import type { WorkSchedule } from "../types/index.ts";
 
+export type ConfigTab = "schedule" | "connections";
+export type ConfigField = "morningStart" | "morningEnd" | "afternoonStart" | "afternoonEnd";
+export type ConnectionAction = "bamboohr" | "gmail";
+export type InputMode = "none" | "bamboohr_domain" | "bamboohr_apikey" | "gmail_password";
+
+interface ConnectionStatus {
+  bamboohr: { configured: boolean; domain?: string };
+  gmail: { configured: boolean; email?: string };
+}
+
 interface ConfigModalProps {
+  activeTab: ConfigTab;
   schedule: WorkSchedule;
   activeField: ConfigField;
   cursorPosition: number;
+  connections: ConnectionStatus;
+  selectedConnection: ConnectionAction;
+  inputMode: InputMode;
+  inputLabel: string;
+  inputPlaceholder?: string;
   saving: boolean;
   error: string | null;
+  onInputChange?: (value: string) => void;
+  onInputSubmit?: (value: string) => void;
+  onInputRef?: (ref: InputRenderable | null) => void;
 }
-
-export type ConfigField = "morningStart" | "morningEnd" | "afternoonStart" | "afternoonEnd";
 
 const COLORS = {
   border: "#a78bfa",
@@ -18,6 +35,8 @@ const COLORS = {
   inactive: "#64748b",
   error: "#f87171",
   cursor: "#fbbf24",
+  success: "#4ade80",
+  warning: "#fbbf24",
 };
 
 function padTime(value: string): string {
@@ -27,46 +46,31 @@ function padTime(value: string): string {
   return `${hours}:${minutes}`;
 }
 
-interface BlinkingCursorProps {
-  char: string;
-}
-
-function BlinkingCursor({ char }: BlinkingCursorProps) {
-  const [blinkOn, setBlinkOn] = useState(true);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setBlinkOn((prev) => !prev);
-    }, 500);
-    return () => clearInterval(interval);
-  }, []);
-
+const BlinkingCursor = memo(function BlinkingCursor({ char }: { char: string }) {
   return (
-    <box backgroundColor={blinkOn ? COLORS.cursor : undefined}>
-      <text attributes={TextAttributes.BOLD}>{char}</text>
+    <box backgroundColor={COLORS.cursor}>
+      <text attributes={TextAttributes.BOLD | TextAttributes.BLINK}>{char}</text>
     </box>
   );
-}
+});
 
-interface TimeDigitProps {
-  char: string;
-  isBold: boolean;
-}
-
-const TimeDigit = memo(function TimeDigit({ char, isBold }: TimeDigitProps) {
+const TimeDigit = memo(function TimeDigit({ char, isBold }: { char: string; isBold: boolean }) {
   return <text attributes={isBold ? TextAttributes.BOLD : 0}>{char}</text>;
 });
 
-interface TimeFieldProps {
-  label: string;
-  value: string;
-  isActive: boolean;
-  cursorPosition: number;
-}
-
 const CHAR_INDEX_MAP = [0, 1, 3, 4];
 
-const TimeField = memo(function TimeField({ label, value, isActive, cursorPosition }: TimeFieldProps) {
+const TimeField = memo(function TimeField({ 
+  label, 
+  value, 
+  isActive, 
+  cursorPosition 
+}: { 
+  label: string; 
+  value: string; 
+  isActive: boolean; 
+  cursorPosition: number;
+}) {
   const paddedValue = padTime(value);
   const chars = paddedValue.split("");
 
@@ -101,67 +105,89 @@ const TimeField = memo(function TimeField({ label, value, isActive, cursorPositi
   );
 });
 
-const ModalHeader = memo(function ModalHeader() {
+const TabBar = memo(function TabBar({ activeTab }: { activeTab: ConfigTab }) {
   return (
-    <box justifyContent="center" marginBottom={1}>
-      <text attributes={TextAttributes.BOLD}>Work Schedule Settings</text>
-    </box>
-  );
-});
-
-interface ErrorDisplayProps {
-  error: string;
-}
-
-const ErrorDisplay = memo(function ErrorDisplay({ error }: ErrorDisplayProps) {
-  return (
-    <box justifyContent="center" marginBottom={1}>
-      <text attributes={TextAttributes.BOLD}>{error}</text>
-    </box>
-  );
-});
-
-const SectionLabel = memo(function SectionLabel({ label }: { label: string }) {
-  return (
-    <box marginBottom={1}>
-      <text attributes={TextAttributes.DIM}>{label}</text>
-    </box>
-  );
-});
-
-const StatusBar = memo(function StatusBar({ saving }: { saving: boolean }) {
-  if (saving) {
-    return (
-      <box justifyContent="center">
-        <text attributes={TextAttributes.DIM}>Saving...</text>
+    <box flexDirection="row" justifyContent="center" gap={2} marginBottom={1}>
+      <box 
+        borderStyle={activeTab === "schedule" ? "single" : undefined}
+        borderColor={COLORS.active}
+        paddingLeft={1}
+        paddingRight={1}
+      >
+        <text attributes={activeTab === "schedule" ? TextAttributes.BOLD : TextAttributes.DIM}>
+          Schedule
+        </text>
       </box>
-    );
-  }
-
-  return (
-    <box justifyContent="center" gap={2}>
-      <text attributes={TextAttributes.DIM}>[Arrows] Edit</text>
-      <text attributes={TextAttributes.DIM}>[Tab] Next field</text>
-      <text attributes={TextAttributes.DIM}>[Enter] Save</text>
+      <box 
+        borderStyle={activeTab === "connections" ? "single" : undefined}
+        borderColor={COLORS.active}
+        paddingLeft={1}
+        paddingRight={1}
+      >
+        <text attributes={activeTab === "connections" ? TextAttributes.BOLD : TextAttributes.DIM}>
+          Connections
+        </text>
+      </box>
     </box>
   );
 });
 
-export function ConfigModal({ schedule, activeField, cursorPosition, saving, error }: ConfigModalProps) {
+const ConnectionItem = memo(function ConnectionItem({ 
+  label, 
+  configured, 
+  detail, 
+  isSelected 
+}: { 
+  label: string; 
+  configured: boolean; 
+  detail?: string;
+  isSelected: boolean;
+}) {
+  const statusIndicator = configured ? "✓" : "○";
+  const statusText = configured ? "Connected" : "Not configured";
+
   return (
-    <box
-      flexDirection="column"
-      padding={1}
-      borderStyle="rounded"
-      borderColor={COLORS.border}
-      minWidth={40}
-    >
-      <ModalHeader />
+    <box flexDirection="row" gap={1} alignItems="center">
+      <text attributes={isSelected ? TextAttributes.BOLD : TextAttributes.DIM}>
+        {isSelected ? ">" : " "}
+      </text>
+      <box 
+        flexDirection="column" 
+        flexGrow={1}
+        borderStyle={isSelected ? "single" : undefined}
+        borderColor={COLORS.active}
+        paddingLeft={isSelected ? 1 : 0}
+        paddingRight={isSelected ? 1 : 0}
+      >
+        <box flexDirection="row" justifyContent="space-between">
+          <text attributes={isSelected ? TextAttributes.BOLD : 0}>{label}</text>
+          <text attributes={configured ? TextAttributes.BOLD : TextAttributes.DIM}>
+            {statusIndicator} {statusText}
+          </text>
+        </box>
+        {detail && (
+          <text attributes={TextAttributes.DIM}>{detail}</text>
+        )}
+      </box>
+    </box>
+  );
+});
 
-      {error && <ErrorDisplay error={error} />}
-
+const ScheduleTab = memo(function ScheduleTab({ 
+  schedule, 
+  activeField, 
+  cursorPosition 
+}: { 
+  schedule: WorkSchedule; 
+  activeField: ConfigField; 
+  cursorPosition: number;
+}) {
+  return (
+    <>
       <box flexDirection="column" gap={1} marginBottom={1}>
-        <SectionLabel label="Morning" />
+        <box marginBottom={1}>
+          <text attributes={TextAttributes.DIM}>Morning</text>
+        </box>
         <TimeField
           label="  Start"
           value={schedule.morning.start}
@@ -177,7 +203,9 @@ export function ConfigModal({ schedule, activeField, cursorPosition, saving, err
       </box>
 
       <box flexDirection="column" gap={1} marginBottom={1}>
-        <SectionLabel label="Afternoon" />
+        <box marginBottom={1}>
+          <text attributes={TextAttributes.DIM}>Afternoon</text>
+        </box>
         <TimeField
           label="  Start"
           value={schedule.afternoon.start}
@@ -191,11 +219,219 @@ export function ConfigModal({ schedule, activeField, cursorPosition, saving, err
           cursorPosition={cursorPosition}
         />
       </box>
+    </>
+  );
+});
 
-      <StatusBar saving={saving} />
+const ConnectionsTab = memo(function ConnectionsTab({ 
+  connections, 
+  selectedConnection 
+}: { 
+  connections: ConnectionStatus; 
+  selectedConnection: ConnectionAction;
+}) {
+  return (
+    <box flexDirection="column" gap={2} marginBottom={1}>
+      <ConnectionItem
+        label="BambooHR"
+        configured={connections.bamboohr.configured}
+        detail={connections.bamboohr.domain ? `Domain: ${connections.bamboohr.domain}` : undefined}
+        isSelected={selectedConnection === "bamboohr"}
+      />
+      <ConnectionItem
+        label="Gmail Reminders"
+        configured={connections.gmail.configured}
+        detail={connections.gmail.email ? `Email: ${connections.gmail.email}` : undefined}
+        isSelected={selectedConnection === "gmail"}
+      />
     </box>
   );
-}
+});
+
+
+
+const InputModeTab = memo(function InputModeTab({
+  inputMode,
+  inputLabel,
+  inputPlaceholder,
+  onInputChange,
+  onInputSubmit,
+  onInputRef,
+}: {
+  inputMode: InputMode;
+  inputLabel: string;
+  inputPlaceholder?: string;
+  onInputChange?: (value: string) => void;
+  onInputSubmit?: (value: string) => void;
+  onInputRef?: (ref: InputRenderable | null) => void;
+}) {
+  const title = inputMode.startsWith("bamboohr") ? "BambooHR Setup" : "Gmail Setup";
+  const hint = inputMode === "bamboohr_domain" 
+    ? "Enter your company domain (e.g., 'yourcompany' from yourcompany.bamboohr.com)"
+    : inputMode === "bamboohr_apikey"
+    ? "Enter your BambooHR API key"
+    : "Enter your Gmail App Password (16 characters)";
+
+  const inputRef = useCallback((node: InputRenderable | null) => {
+    onInputRef?.(node);
+  }, [onInputRef]);
+
+  return (
+    <box flexDirection="column" gap={1} marginBottom={1}>
+      <box justifyContent="center" marginBottom={1}>
+        <text attributes={TextAttributes.BOLD}>{title}</text>
+      </box>
+      <box marginBottom={1}>
+        <text attributes={TextAttributes.DIM}>{hint}</text>
+      </box>
+      <box flexDirection="column" gap={1} marginBottom={1}>
+        <text attributes={TextAttributes.BOLD}>{inputLabel}</text>
+        <box
+          borderStyle="single"
+          borderColor={COLORS.active}
+          height={3}
+          minWidth={40}
+        >
+          <input
+            ref={inputRef}
+            placeholder={inputPlaceholder ?? "Type or paste here..."}
+            focused
+            onInput={onInputChange}
+            onSubmit={onInputSubmit}
+          />
+        </box>
+      </box>
+    </box>
+  );
+});
+
+const InputStatusBar = memo(function InputStatusBar() {
+  return (
+    <>
+      <text attributes={TextAttributes.DIM}>[Type] Enter value</text>
+      <text attributes={TextAttributes.DIM}>[Enter] Confirm</text>
+      <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
+    </>
+  );
+});
+
+const ModalHeader = memo(function ModalHeader() {
+  return (
+    <box justifyContent="center" marginBottom={1}>
+      <text attributes={TextAttributes.BOLD}>Settings</text>
+    </box>
+  );
+});
+
+const ErrorDisplay = memo(function ErrorDisplay({ error }: { error: string }) {
+  return (
+    <box justifyContent="center" marginBottom={1}>
+      <text attributes={TextAttributes.BOLD}>{error}</text>
+    </box>
+  );
+});
+
+const ScheduleStatusBar = memo(function ScheduleStatusBar() {
+  return (
+    <>
+      <text attributes={TextAttributes.DIM}>[Arrows] Edit</text>
+      <text attributes={TextAttributes.DIM}>[Tab] Next</text>
+      <text attributes={TextAttributes.DIM}>[Enter] Save</text>
+    </>
+  );
+});
+
+const ConnectionsStatusBar = memo(function ConnectionsStatusBar() {
+  return (
+    <>
+      <text attributes={TextAttributes.DIM}>[↑/↓] Select</text>
+      <text attributes={TextAttributes.DIM}>[Enter] Reconfigure</text>
+    </>
+  );
+});
+
+const TabSwitchHint = memo(function TabSwitchHint() {
+  return <text attributes={TextAttributes.DIM}>[&lt;/&gt;] Switch tab</text>;
+});
+
+const SavingIndicator = memo(function SavingIndicator() {
+  return (
+    <box justifyContent="center">
+      <text attributes={TextAttributes.DIM}>Saving...</text>
+    </box>
+  );
+});
+
+export const ConfigModal = memo(function ConfigModal({ 
+  activeTab,
+  schedule, 
+  activeField, 
+  cursorPosition, 
+  connections,
+  selectedConnection,
+  inputMode,
+  inputLabel,
+  inputPlaceholder,
+  saving, 
+  error,
+  onInputChange,
+  onInputSubmit,
+  onInputRef,
+}: ConfigModalProps) {
+  const isInputMode = inputMode !== "none";
+
+  return (
+    <box
+      flexDirection="column"
+      padding={1}
+      borderStyle="rounded"
+      borderColor={COLORS.border}
+      minWidth={45}
+    >
+      {!isInputMode && <ModalHeader />}
+
+      {!isInputMode && <TabBar activeTab={activeTab} />}
+
+      {error && <ErrorDisplay error={error} />}
+
+      {isInputMode ? (
+        <InputModeTab 
+          inputMode={inputMode}
+          inputLabel={inputLabel}
+          inputPlaceholder={inputPlaceholder}
+          onInputChange={onInputChange}
+          onInputSubmit={onInputSubmit}
+          onInputRef={onInputRef}
+        />
+      ) : activeTab === "schedule" ? (
+        <ScheduleTab 
+          schedule={schedule} 
+          activeField={activeField} 
+          cursorPosition={cursorPosition} 
+        />
+      ) : (
+        <ConnectionsTab 
+          connections={connections} 
+          selectedConnection={selectedConnection} 
+        />
+      )}
+
+      {saving ? (
+        <SavingIndicator />
+      ) : (
+        <box justifyContent="center" gap={2}>
+          {isInputMode ? (
+            <InputStatusBar />
+          ) : activeTab === "schedule" ? (
+            <><ScheduleStatusBar /><TabSwitchHint /></>
+          ) : (
+            <><ConnectionsStatusBar /><TabSwitchHint /></>
+          )}
+        </box>
+      )}
+    </box>
+  );
+});
 
 export function adjustTimeDigit(time: string, position: number, delta: number): string {
   const padded = padTime(time);

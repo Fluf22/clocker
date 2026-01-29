@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { createCliRenderer, TextAttributes, type CliRenderer } from "@opentui/core";
+import { createCliRenderer, TextAttributes, type CliRenderer, type InputRenderable } from "@opentui/core";
 import { createRoot, useRenderer } from "@opentui/react";
 import { DialogProvider, useDialog, useDialogState } from "@opentui-ui/dialog/react";
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -10,8 +10,12 @@ import { Calendar } from "./components/Calendar.tsx";
 import { DayModal } from "./components/DayModal.tsx";
 import { EditModal, adjustTimeDigit, getScheduleHours, extractScheduleFromEntries, type EditField } from "./components/EditModal.tsx";
 import { BulkSubmitModal } from "./components/BulkSubmitModal.tsx";
-import { ConfigModal, type ConfigField } from "./components/ConfigModal.tsx";
+import { ConfigModal, type ConfigField, type ConfigTab, type ConnectionAction, type InputMode } from "./components/ConfigModal.tsx";
 import { SettingsProvider, useSettings } from "./context/SettingsContext.tsx";
+import { getLastWorkingDay, getMonthName, getNextMonth } from "./utils/reminder.ts";
+import { loadGmailConfig, saveGmailConfig, type GmailConfig } from "./config/gmail.ts";
+import { scheduleReminderEmail, verifyGmailCredentials } from "./email/sender.ts";
+import { wasReminderSent, markReminderSent } from "./config/reminders.ts";
 import type { Employee, BasicCredentials, TimesheetEntry, TimeOffRequest, Holiday, WorkSchedule } from "./types/index.ts";
 
 function openBrowser(url: string): void {
@@ -59,6 +63,48 @@ async function setupCredentials(): Promise<BasicCredentials> {
   console.log("\nCredentials saved!\n");
 
   return credentials;
+}
+
+async function setupGmailAppPassword(employeeEmail: string): Promise<void> {
+  console.log("\n=== Gmail App Password Setup ===\n");
+  console.log("To receive email reminders, you need to create a Gmail App Password.");
+  console.log("This requires 2-Step Verification to be enabled on your Google account.\n");
+
+  console.log("Opening Google App Passwords page...");
+  openBrowser("https://myaccount.google.com/apppasswords");
+
+  console.log("\nSteps:");
+  console.log("1. Sign in to your Google account if prompted");
+  console.log("2. Select 'Mail' as the app");
+  console.log("3. Select your device type");
+  console.log("4. Click 'Generate'");
+  console.log("5. Copy the 16-character password (spaces are optional)\n");
+
+  const appPassword = await promptForInput("Paste your App Password: ");
+
+  if (!appPassword) {
+    console.error("App password is required for email reminders.");
+    process.exit(1);
+  }
+
+  const cleanPassword = appPassword.replace(/\s/g, "");
+  if (cleanPassword.length !== 16) {
+    console.error("App password should be 16 characters. Got " + cleanPassword.length);
+    process.exit(1);
+  }
+
+  const gmailConfig = { email: employeeEmail, appPassword: cleanPassword };
+
+  console.log("\nVerifying credentials...");
+  try {
+    await verifyGmailCredentials(gmailConfig);
+  } catch {
+    console.error("Invalid credentials - could not connect to Gmail.");
+    process.exit(1);
+  }
+
+  await saveGmailConfig(gmailConfig);
+  console.log("Gmail configuration saved!\n");
 }
 
 const COLORS = {
@@ -198,6 +244,18 @@ function App({ client, renderer }: AppProps) {
     configSchedule: null as WorkSchedule | null,
     configActiveField: "morningStart" as ConfigField,
     configCursorPosition: 0,
+    configActiveTab: "schedule" as ConfigTab,
+    configSelectedConnection: "bamboohr" as ConnectionAction,
+    configConnections: {
+      bamboohr: { configured: false, domain: undefined as string | undefined },
+      gmail: { configured: false, email: undefined as string | undefined },
+    },
+    configInputMode: "none" as InputMode,
+    configInputValue: "",
+    configInputLabel: "",
+    configInputPlaceholder: undefined as string | undefined,
+    configInputData: { domain: "", apiKey: "" },
+    configInputRef: null as InputRenderable | null,
     editSchedule: null as WorkSchedule | null,
     editActiveField: "morningStart" as EditField,
     editCursorPosition: 0,
@@ -593,11 +651,6 @@ function App({ client, renderer }: AppProps) {
     stateRef.current.dialogOpen = true;
     
     const missingDays = getMissingDays();
-    if (missingDays.length === 0) {
-      stateRef.current.dialogOpen = false;
-      return;
-    }
-    
     const hoursPerDay = getScheduleHours(settings.workSchedule);
     
     stateRef.current.bulkProgress = 0;
@@ -670,7 +723,7 @@ function App({ client, renderer }: AppProps) {
     };
 
     const bulkHandler = (event: { name: string }) => {
-      if (event.name === "return" && !stateRef.current.saving) {
+      if (event.name === "return" && !stateRef.current.saving && missingDays.length > 0) {
         bulkSubmit();
       }
     };
@@ -680,7 +733,7 @@ function App({ client, renderer }: AppProps) {
     updateDialog();
   }, [dialog, renderer, client, settings, getMissingDays, refreshEntries]);
 
-  const showConfigModal = useCallback(() => {
+  const showConfigModal = useCallback(async () => {
     if (stateRef.current.dialogOpen) return;
     stateRef.current.dialogOpen = true;
     
@@ -690,30 +743,88 @@ function App({ client, renderer }: AppProps) {
     };
     stateRef.current.configActiveField = "morningStart";
     stateRef.current.configCursorPosition = 0;
+    stateRef.current.configActiveTab = "schedule";
+    stateRef.current.configSelectedConnection = "bamboohr";
+    stateRef.current.configInputMode = "none";
+    stateRef.current.configInputValue = "";
+    stateRef.current.configInputLabel = "";
+    stateRef.current.configInputData = { domain: "", apiKey: "" };
     stateRef.current.saveError = null;
     stateRef.current.saving = false;
     
-    let configHandlerRef: ((event: { name: string; shift?: boolean }) => void) | null = null;
+    const credentials = await loadCredentials();
+    const gmailConfig = await loadGmailConfig();
+    
+    stateRef.current.configConnections = {
+      bamboohr: { 
+        configured: credentials !== null, 
+        domain: credentials?.companyDomain,
+      },
+      gmail: { 
+        configured: gmailConfig !== null, 
+        email: gmailConfig?.email,
+      },
+    };
+    
+    let configHandlerRef: ((event: { name: string; shift?: boolean; sequence?: string }) => void) | null = null;
+    let pasteHandlerRef: ((event: { text: string }) => void) | null = null;
     
     const cleanup = () => {
       if (configHandlerRef) {
         renderer.keyInput.off("keypress", configHandlerRef);
         configHandlerRef = null;
       }
+      if (pasteHandlerRef) {
+        renderer.keyInput.off("paste", pasteHandlerRef);
+        pasteHandlerRef = null;
+      }
+      stateRef.current.configInputRef = null;
       stateRef.current.dialogOpen = false;
       stateRef.current.saving = false;
     };
     
+    const handleInputChange = (value: string) => {
+      stateRef.current.configInputValue = value;
+    };
+
+    const handleInputSubmit = (value: string) => {
+      stateRef.current.configInputValue = value;
+      confirmInput();
+    };
+
+    const handleInputRef = (ref: InputRenderable | null) => {
+      stateRef.current.configInputRef = ref;
+    };
+
+    const pasteHandler = (event: { text: string }) => {
+      const input = stateRef.current.configInputRef;
+      if (input && stateRef.current.configInputMode !== "none" && !stateRef.current.saving) {
+        const text = stateRef.current.configInputMode === "gmail_password" 
+          ? event.text.replace(/\s/g, "") 
+          : event.text;
+        input.insertText(text);
+      }
+    };
+
     const updateDialog = () => {
       if (!stateRef.current.configSchedule) return;
       dialog.show({
         content: () => (
           <ConfigModal
+            activeTab={stateRef.current.configActiveTab}
             schedule={stateRef.current.configSchedule!}
             activeField={stateRef.current.configActiveField}
             cursorPosition={stateRef.current.configCursorPosition}
+            connections={stateRef.current.configConnections}
+            selectedConnection={stateRef.current.configSelectedConnection}
+            inputMode={stateRef.current.configInputMode}
+            inputLabel={stateRef.current.configInputLabel}
+            inputPlaceholder={stateRef.current.configInputPlaceholder}
             saving={stateRef.current.saving}
             error={stateRef.current.saveError}
+            onInputChange={handleInputChange}
+            onInputSubmit={handleInputSubmit}
+            onInputRef={handleInputRef}
           />
         ),
         closeOnEscape: !stateRef.current.saving,
@@ -724,6 +835,7 @@ function App({ client, renderer }: AppProps) {
     };
 
     const fields: ConfigField[] = ["morningStart", "morningEnd", "afternoonStart", "afternoonEnd"];
+    const connections: ConnectionAction[] = ["bamboohr", "gmail"];
     
     const getFieldValue = (field: ConfigField): string => {
       if (!stateRef.current.configSchedule) return "00:00";
@@ -773,58 +885,222 @@ function App({ client, renderer }: AppProps) {
       }
     };
 
-    const configHandler = (event: { name: string; shift?: boolean }) => {
+    const startInputMode = (mode: InputMode, label: string, placeholder?: string) => {
+      stateRef.current.configInputMode = mode;
+      stateRef.current.configInputValue = "";
+      stateRef.current.configInputLabel = label;
+      stateRef.current.configInputPlaceholder = placeholder;
+      stateRef.current.saveError = null;
+      updateDialog();
+    };
+
+    const cancelInputMode = () => {
+      stateRef.current.configInputMode = "none";
+      stateRef.current.configInputValue = "";
+      stateRef.current.configInputLabel = "";
+      stateRef.current.configInputPlaceholder = undefined;
+      stateRef.current.configInputData = { domain: "", apiKey: "" };
+      updateDialog();
+    };
+
+    const confirmInput = async () => {
+      const mode = stateRef.current.configInputMode;
+      const value = stateRef.current.configInputValue.trim();
+
+      if (!value) {
+        stateRef.current.saveError = "Value cannot be empty";
+        updateDialog();
+        return;
+      }
+
+      if (mode === "bamboohr_domain") {
+        stateRef.current.configInputData.domain = value;
+        startInputMode("bamboohr_apikey", "API Key");
+        openBrowser(`https://${value}.bamboohr.com/settings/permissions/api.php`);
+        return;
+      }
+
+      if (mode === "bamboohr_apikey") {
+        stateRef.current.configInputData.apiKey = value;
+        stateRef.current.saving = true;
+        updateDialog();
+
+        try {
+          const newCredentials: BasicCredentials = {
+            type: "basic",
+            companyDomain: stateRef.current.configInputData.domain,
+            apiKey: value,
+          };
+          await saveCredentials(newCredentials);
+          stateRef.current.configConnections.bamboohr = {
+            configured: true,
+            domain: newCredentials.companyDomain,
+          };
+          stateRef.current.saving = false;
+          cancelInputMode();
+        } catch (err) {
+          stateRef.current.saveError = err instanceof Error ? err.message : "Save failed";
+          stateRef.current.saving = false;
+          updateDialog();
+        }
+        return;
+      }
+
+      if (mode === "gmail_password") {
+        const cleanPassword = value.replace(/\s/g, "");
+        if (cleanPassword.length !== 16) {
+          stateRef.current.saveError = `App password must be 16 characters (got ${cleanPassword.length})`;
+          updateDialog();
+          return;
+        }
+
+        const email = employee?.workEmail;
+        if (!email) {
+          stateRef.current.saveError = "Employee email not available";
+          updateDialog();
+          return;
+        }
+
+        stateRef.current.saving = true;
+        updateDialog();
+
+        const gmailConfig = { email, appPassword: cleanPassword };
+
+        try {
+          await verifyGmailCredentials(gmailConfig);
+        } catch (err) {
+          stateRef.current.saveError = "Invalid credentials - could not connect to Gmail";
+          stateRef.current.saving = false;
+          updateDialog();
+          return;
+        }
+
+        try {
+          await saveGmailConfig(gmailConfig);
+          stateRef.current.configConnections.gmail = {
+            configured: true,
+            email,
+          };
+          stateRef.current.saving = false;
+          cancelInputMode();
+        } catch (err) {
+          stateRef.current.saveError = err instanceof Error ? err.message : "Save failed";
+          stateRef.current.saving = false;
+          updateDialog();
+        }
+        return;
+      }
+    };
+
+    const startReconfigure = () => {
+      const selected = stateRef.current.configSelectedConnection;
+      if (selected === "bamboohr") {
+        startInputMode("bamboohr_domain", "Company Domain");
+      } else if (selected === "gmail") {
+        openBrowser("https://myaccount.google.com/apppasswords");
+        const placeholder = stateRef.current.configConnections.gmail.configured
+          ? "(Replace your current app password)"
+          : undefined;
+        startInputMode("gmail_password", "App Password", placeholder);
+      }
+    };
+
+    const configHandler = (event: { name: string; shift?: boolean; sequence?: string }) => {
       if (stateRef.current.saving) return;
-      
-      if (event.name === "return") {
-        saveConfig();
+
+      if (stateRef.current.configInputMode !== "none") {
+        if (event.name === "escape") {
+          cancelInputMode();
+        }
         return;
       }
       
-      if (event.name === "tab") {
-        const currentIndex = fields.indexOf(stateRef.current.configActiveField);
-        const nextIndex = event.shift 
-          ? (currentIndex - 1 + fields.length) % fields.length
-          : (currentIndex + 1) % fields.length;
-        stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
-        stateRef.current.configCursorPosition = 0;
+      if (event.name === "," || event.name === "<") {
+        stateRef.current.configActiveTab = "schedule";
         updateDialog();
         return;
       }
       
-      if (event.name === "left") {
-        stateRef.current.configCursorPosition = Math.max(0, stateRef.current.configCursorPosition - 1);
+      if (event.name === "." || event.name === ">") {
+        stateRef.current.configActiveTab = "connections";
         updateDialog();
         return;
       }
       
-      if (event.name === "right") {
-        stateRef.current.configCursorPosition = Math.min(3, stateRef.current.configCursorPosition + 1);
-        updateDialog();
-        return;
-      }
-      
-      if (event.name === "up") {
-        const currentValue = getFieldValue(stateRef.current.configActiveField);
-        const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, 1);
-        setFieldValue(stateRef.current.configActiveField, newValue);
-        updateDialog();
-        return;
-      }
-      
-      if (event.name === "down") {
-        const currentValue = getFieldValue(stateRef.current.configActiveField);
-        const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, -1);
-        setFieldValue(stateRef.current.configActiveField, newValue);
-        updateDialog();
-        return;
+      if (stateRef.current.configActiveTab === "schedule") {
+        if (event.name === "return") {
+          saveConfig();
+          return;
+        }
+        
+        if (event.name === "tab") {
+          const currentIndex = fields.indexOf(stateRef.current.configActiveField);
+          const nextIndex = event.shift 
+            ? (currentIndex - 1 + fields.length) % fields.length
+            : (currentIndex + 1) % fields.length;
+          stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
+          stateRef.current.configCursorPosition = 0;
+          updateDialog();
+          return;
+        }
+        
+        if (event.name === "left") {
+          stateRef.current.configCursorPosition = Math.max(0, stateRef.current.configCursorPosition - 1);
+          updateDialog();
+          return;
+        }
+        
+        if (event.name === "right") {
+          stateRef.current.configCursorPosition = Math.min(3, stateRef.current.configCursorPosition + 1);
+          updateDialog();
+          return;
+        }
+        
+        if (event.name === "up") {
+          const currentValue = getFieldValue(stateRef.current.configActiveField);
+          const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, 1);
+          setFieldValue(stateRef.current.configActiveField, newValue);
+          updateDialog();
+          return;
+        }
+        
+        if (event.name === "down") {
+          const currentValue = getFieldValue(stateRef.current.configActiveField);
+          const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, -1);
+          setFieldValue(stateRef.current.configActiveField, newValue);
+          updateDialog();
+          return;
+        }
+      } else {
+        if (event.name === "up") {
+          const currentIndex = connections.indexOf(stateRef.current.configSelectedConnection);
+          const newIndex = (currentIndex - 1 + connections.length) % connections.length;
+          stateRef.current.configSelectedConnection = connections[newIndex] ?? "bamboohr";
+          updateDialog();
+          return;
+        }
+        
+        if (event.name === "down") {
+          const currentIndex = connections.indexOf(stateRef.current.configSelectedConnection);
+          const newIndex = (currentIndex + 1) % connections.length;
+          stateRef.current.configSelectedConnection = connections[newIndex] ?? "bamboohr";
+          updateDialog();
+          return;
+        }
+        
+        if (event.name === "return") {
+          startReconfigure();
+          return;
+        }
       }
     };
     
     configHandlerRef = configHandler;
+    pasteHandlerRef = pasteHandler;
     renderer.keyInput.on("keypress", configHandler);
+    renderer.keyInput.on("paste", pasteHandler);
     updateDialog();
-  }, [dialog, renderer, settings, updateSettings]);
+  }, [dialog, renderer, settings, updateSettings, employee]);
 
   useEffect(() => {
     const handler = (event: { name: string; ctrl: boolean; shift: boolean }) => {
@@ -929,7 +1205,135 @@ function Root({ client, renderer }: AppProps) {
   );
 }
 
+async function handleSubmitFlag(): Promise<void> {
+  let credentials = await loadCredentials();
+  if (!credentials) {
+    credentials = await setupCredentials();
+  }
+
+  const client = new BambooHRClient(credentials);
+  
+  console.log("Fetching employee info...");
+  const employee = await client.getEmployee(0, ["id", "firstName", "lastName", "workEmail"]);
+  const employeeEmail = employee.workEmail;
+  
+  if (!employeeEmail) {
+    console.error("Could not find employee work email in BambooHR.");
+    process.exit(1);
+  }
+
+  let gmailConfig = await loadGmailConfig();
+  if (!gmailConfig) {
+    await setupGmailAppPassword(employeeEmail);
+    gmailConfig = await loadGmailConfig();
+  }
+
+  if (!gmailConfig) {
+    console.error("Gmail configuration failed.");
+    process.exit(1);
+  }
+
+  const { loadSettings } = await import("./config/settings.ts");
+  const settings = await loadSettings();
+  const schedule = settings.workSchedule;
+
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const startOfMonth = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const endOfMonth = `${year}-${String(month + 1).padStart(2, "0")}-${lastDay}`;
+
+  console.log("Fetching timesheet data...");
+  const [entries, timeOff, holidays] = await Promise.all([
+    client.getTimesheetEntries(startOfMonth, endOfMonth),
+    client.getTimeOffRequests(startOfMonth, endOfMonth),
+    client.getHolidays(startOfMonth, endOfMonth),
+  ]);
+
+  const isWeekend = (date: Date) => date.getDay() === 0 || date.getDay() === 6;
+  const formatDateStr = (y: number, m: number, d: number) => 
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  
+  const isHoliday = (dateStr: string) => 
+    holidays.some((h) => dateStr >= h.start && dateStr <= h.end);
+  const isTimeOffDay = (dateStr: string) => 
+    timeOff.some((t) => dateStr >= t.start && dateStr <= t.end);
+  const hasEntry = (dateStr: string) => 
+    entries.some((e) => e.date === dateStr);
+
+  const missingDays: string[] = [];
+  for (let day = 1; day <= today.getDate(); day++) {
+    const date = new Date(year, month, day);
+    const dateStr = formatDateStr(year, month, day);
+    
+    if (!isWeekend(date) && !isHoliday(dateStr) && !isTimeOffDay(dateStr) && !hasEntry(dateStr)) {
+      missingDays.push(dateStr);
+    }
+  }
+
+  if (missingDays.length === 0) {
+    console.log("\nNo missing days to submit!");
+  } else {
+    console.log(`\nSubmitting ${missingDays.length} missing day(s)...`);
+    
+    for (const dateStr of missingDays) {
+      await client.storeClockEntry({
+        date: dateStr,
+        start: schedule.morning.start,
+        end: schedule.morning.end,
+      });
+      await client.storeClockEntry({
+        date: dateStr,
+        start: schedule.afternoon.start,
+        end: schedule.afternoon.end,
+      });
+      console.log(`  Submitted: ${dateStr}`);
+    }
+    
+    console.log("\nAll entries submitted!");
+  }
+
+  const nextMonth = getNextMonth(year, month);
+  const nextMonthStart = `${nextMonth.year}-${String(nextMonth.month + 1).padStart(2, "0")}-01`;
+  const nextMonthLastDay = new Date(nextMonth.year, nextMonth.month + 1, 0).getDate();
+  const nextMonthEnd = `${nextMonth.year}-${String(nextMonth.month + 1).padStart(2, "0")}-${nextMonthLastDay}`;
+
+  console.log("\nFetching next month's holidays and time off...");
+  const [nextHolidays, nextTimeOff] = await Promise.all([
+    client.getHolidays(nextMonthStart, nextMonthEnd),
+    client.getTimeOffRequests(nextMonthStart, nextMonthEnd),
+  ]);
+
+  const nextLastWorkingDay = getLastWorkingDay(nextMonth.year, nextMonth.month, nextHolidays, nextTimeOff);
+  const nextMonthName = getMonthName(nextMonth.month);
+
+  const alreadySent = await wasReminderSent(nextMonth.year, nextMonth.month);
+  if (alreadySent) {
+    console.log(`\nReminder for ${nextMonthName} was already sent. Skipping.`);
+    process.exit(0);
+  }
+
+  const submitCommand = "bun run src/index.tsx --submit";
+
+  console.log(`\nScheduling reminder email for ${nextMonthName}...`);
+  console.log(`Last working day: ${nextLastWorkingDay.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}`);
+
+  await scheduleReminderEmail(nextLastWorkingDay, nextMonthName, submitCommand);
+  await markReminderSent(nextMonth.year, nextMonth.month);
+  console.log("Reminder email sent to " + gmailConfig.email);
+
+  process.exit(0);
+}
+
 async function main() {
+  const args = process.argv.slice(2);
+
+  if (args.includes("--submit")) {
+    await handleSubmitFlag();
+    return;
+  }
+
   let credentials = await loadCredentials();
 
   if (!credentials) {
