@@ -1,8 +1,9 @@
 import { TextAttributes } from "@opentui/core";
 import { MODAL_COLORS } from "../constants/modalColors.ts";
 import type { EditModalProps } from "../types/editModal.ts";
-import { TimeField } from "./config/TimeField.tsx";
-import { calculateTotalHours, formatTotalHours } from "../utils/schedule.ts";
+import { TimePeriodSection, ErrorDisplay, FutureMonthWarning, SavingIndicator } from "./config/index.ts";
+import { calculateTotalHours, formatHoursAsDuration } from "../utils/schedule.ts";
+import { KeyHint, KeyHintBar } from "./KeyHint.tsx";
 
 export type { EditField } from "../types/editModal.ts";
 export { adjustTimeDigit } from "../utils/time.ts";
@@ -30,77 +31,42 @@ export function EditModal({ date, schedule, activeField, cursorPosition, saving,
         <text attributes={TextAttributes.BOLD}>{displayDate}</text>
       </box>
 
-      {error && (
-        <box justifyContent="center" marginBottom={1}>
-          <text attributes={TextAttributes.BOLD}>{error}</text>
-        </box>
-      )}
+      {error && <ErrorDisplay error={error} />}
 
       {isFutureMonth ? (
-        <>
-          <box justifyContent="center" marginBottom={1}>
-            <text>Timesheet not open yet</text>
-          </box>
-          <box justifyContent="center" marginBottom={1}>
-            <text attributes={TextAttributes.DIM}>This month's timesheet is not available for editing.</text>
-          </box>
-          <box justifyContent="center">
-            <text attributes={TextAttributes.DIM}>[Esc] Close</text>
-          </box>
-        </>
+        <FutureMonthWarning action="editing" />
       ) : (
         <>
-          <box flexDirection="column" gap={1} marginBottom={1}>
-            <box marginBottom={1}>
-              <text attributes={TextAttributes.DIM}>Morning</text>
-            </box>
-            <TimeField
-              label="  Start"
-              value={schedule.morning.start}
-              isActive={activeField === "morningStart"}
-              cursorPosition={cursorPosition}
-            />
-            <TimeField
-              label="  End"
-              value={schedule.morning.end}
-              isActive={activeField === "morningEnd"}
-              cursorPosition={cursorPosition}
-            />
-          </box>
-
-          <box flexDirection="column" gap={1} marginBottom={1}>
-            <box marginBottom={1}>
-              <text attributes={TextAttributes.DIM}>Afternoon</text>
-            </box>
-            <TimeField
-              label="  Start"
-              value={schedule.afternoon.start}
-              isActive={activeField === "afternoonStart"}
-              cursorPosition={cursorPosition}
-            />
-            <TimeField
-              label="  End"
-              value={schedule.afternoon.end}
-              isActive={activeField === "afternoonEnd"}
-              cursorPosition={cursorPosition}
-            />
-          </box>
+          <TimePeriodSection
+            label="Morning"
+            timeRange={schedule.morning}
+            startField="morningStart"
+            endField="morningEnd"
+            activeField={activeField}
+            cursorPosition={cursorPosition}
+          />
+          <TimePeriodSection
+            label="Afternoon"
+            timeRange={schedule.afternoon}
+            startField="afternoonStart"
+            endField="afternoonEnd"
+            activeField={activeField}
+            cursorPosition={cursorPosition}
+          />
 
           <box justifyContent="center" marginBottom={1}>
-            <text attributes={TextAttributes.BOLD}>{`Total: ${formatTotalHours(totalHours)}`}</text>
+            <text attributes={TextAttributes.BOLD}>{`Total: ${formatHoursAsDuration(totalHours)}`}</text>
           </box>
 
-          {saving ? (
-            <box justifyContent="center">
-              <text attributes={TextAttributes.DIM}>Saving...</text>
-            </box>
-          ) : (
-            <box justifyContent="center" gap={2}>
-              <text attributes={TextAttributes.DIM}>[Arrows] Edit</text>
-              <text attributes={TextAttributes.DIM}>[Tab] Next</text>
-              <text attributes={TextAttributes.DIM}>[Enter] Save</text>
-            </box>
-          )}
+           {saving ? (
+             <SavingIndicator />
+           ) : (
+             <KeyHintBar>
+               <KeyHint keyName="Arrows" action="Edit" />
+               <KeyHint keyName="Tab" action="Next" />
+               <KeyHint keyName="Enter" action="Save" />
+             </KeyHintBar>
+           )}
         </>
       )}
     </box>

@@ -142,3 +142,5 @@ export interface WorkSchedule {
 export interface AppSettings {
   workSchedule: WorkSchedule;
 }
+
+export type ScheduleField = "morningStart" | "morningEnd" | "afternoonStart" | "afternoonEnd";

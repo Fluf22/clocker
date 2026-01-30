@@ -1,8 +1,9 @@
 import type { DayStatus } from "../types/calendar.ts";
+import { getDaysInMonth, formatDate } from "./date.ts";
 
-export function getDaysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
+export { getDaysInMonth };
+
+export { formatDate as formatCalendarDate };
 
 export function getFirstDayOfMonth(year: number, month: number): number {
   const day = new Date(year, month, 1).getDay();
@@ -13,18 +14,13 @@ export function getMonthName(month: number): string {
   return new Date(2000, month, 1).toLocaleString("en-US", { month: "long" });
 }
 
-export function formatCalendarDate(year: number, month: number, day: number): string {
-  const m = String(month + 1).padStart(2, "0");
-  const d = String(day).padStart(2, "0");
-  return `${year}-${m}-${d}`;
-}
-
 export function truncateLabel(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 1) + "…";
 }
 
-export function formatHoursAsDuration(hours: number): string {
+export function formatHoursAsDuration(hours: number | undefined): string {
+  if (hours === undefined || hours === 0) return "-";
   const h = Math.floor(hours);
   const m = Math.round((hours - h) * 60);
   if (m === 0) return `${h}h`;

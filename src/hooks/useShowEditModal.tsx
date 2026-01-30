@@ -1,10 +1,12 @@
-import { useCallback, useRef, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useRef, type MutableRefObject } from "react";
 import type { CliRenderer } from "@opentui/core";
 import { BambooHRClient } from "../api/client.ts";
 import { EditModal, adjustTimeDigit, getScheduleHours, extractScheduleFromEntries, type EditField } from "../components/EditModal.tsx";
-import { formatDate } from "../utils/date.ts";
+import { formatDate, isFutureMonth } from "../utils/date.ts";
 import type { DayInfo } from "./useDayInfo.ts";
 import type { TimesheetEntry, WorkSchedule } from "../types/index.ts";
+import type { DialogActions } from "../types/dialog.ts";
+import { useTimeFieldNavigation, SCHEDULE_FIELDS } from "./useTimeFieldNavigation.ts";
 
 interface EditModalState {
   dialogOpen: boolean;
@@ -13,11 +15,6 @@ interface EditModalState {
   editSchedule: WorkSchedule | null;
   editActiveField: EditField;
   editCursorPosition: number;
-}
-
-interface DialogActions {
-  show: (options: { content: () => ReactNode; closeOnEscape?: boolean; backdropOpacity?: number; id?: string; onClose?: () => void }) => unknown;
-  close: () => void;
 }
 
 interface UseShowEditModalParams {
@@ -64,10 +61,7 @@ export function useShowEditModal({
     
     stateRef.current.dialogOpen = true;
     
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-    const isFutureMonth = year > currentYear || (year === currentYear && month > currentMonth);
+    const isMonthInFuture = isFutureMonth(year, month);
     
     const dayEntries = entries.filter((e) => e.date === dateStr);
     stateRef.current.editSchedule = extractScheduleFromEntries(dayEntries, workSchedule);
@@ -98,7 +92,7 @@ export function useShowEditModal({
             cursorPosition={stateRef.current.editCursorPosition}
             saving={stateRef.current.saving}
             error={stateRef.current.saveError}
-            isFutureMonth={isFutureMonth}
+            isFutureMonth={isMonthInFuture}
           />
         ),
         closeOnEscape: !stateRef.current.saving,
@@ -108,35 +102,15 @@ export function useShowEditModal({
       });
     };
 
-    const fields: EditField[] = ["morningStart", "morningEnd", "afternoonStart", "afternoonEnd"];
-    
-    const getFieldValue = (field: EditField): string => {
-      if (!stateRef.current.editSchedule) return "00:00";
-      switch (field) {
-        case "morningStart": return stateRef.current.editSchedule.morning.start;
-        case "morningEnd": return stateRef.current.editSchedule.morning.end;
-        case "afternoonStart": return stateRef.current.editSchedule.afternoon.start;
-        case "afternoonEnd": return stateRef.current.editSchedule.afternoon.end;
-      }
-    };
-    
-    const setFieldValue = (field: EditField, value: string) => {
-      if (!stateRef.current.editSchedule) return;
-      switch (field) {
-        case "morningStart":
-          stateRef.current.editSchedule.morning.start = value;
-          break;
-        case "morningEnd":
-          stateRef.current.editSchedule.morning.end = value;
-          break;
-        case "afternoonStart":
-          stateRef.current.editSchedule.afternoon.start = value;
-          break;
-        case "afternoonEnd":
-          stateRef.current.editSchedule.afternoon.end = value;
-          break;
-      }
-    };
+    const navigation = useTimeFieldNavigation({
+      getSchedule: () => stateRef.current.editSchedule,
+      setSchedule: (schedule) => { stateRef.current.editSchedule = schedule; },
+      getActiveField: () => stateRef.current.editActiveField,
+      setActiveField: (field) => { stateRef.current.editActiveField = field; },
+      getCursorPosition: () => stateRef.current.editCursorPosition,
+      setCursorPosition: (pos) => { stateRef.current.editCursorPosition = pos; },
+      onUpdate: updateDialog,
+    });
 
     const saveClockEntries = async () => {
       if (!stateRef.current.editSchedule) return;
@@ -176,7 +150,7 @@ export function useShowEditModal({
 
     const editHandler = (event: { name: string; shift?: boolean }) => {
       if (stateRef.current.saving) return;
-      if (isFutureMonth) return;
+      if (isMonthInFuture) return;
       
       if (event.name === "return") {
         saveClockEntries();
@@ -184,41 +158,27 @@ export function useShowEditModal({
       }
       
       if (event.name === "tab") {
-        const currentIndex = fields.indexOf(stateRef.current.editActiveField);
-        const nextIndex = event.shift 
-          ? (currentIndex - 1 + fields.length) % fields.length
-          : (currentIndex + 1) % fields.length;
-        stateRef.current.editActiveField = fields[nextIndex] ?? "morningStart";
-        stateRef.current.editCursorPosition = 0;
-        updateDialog();
+        navigation.handleTab(event.shift ?? false);
         return;
       }
       
       if (event.name === "left") {
-        stateRef.current.editCursorPosition = Math.max(0, stateRef.current.editCursorPosition - 1);
-        updateDialog();
+        navigation.handleLeft();
         return;
       }
       
       if (event.name === "right") {
-        stateRef.current.editCursorPosition = Math.min(3, stateRef.current.editCursorPosition + 1);
-        updateDialog();
+        navigation.handleRight();
         return;
       }
       
       if (event.name === "up") {
-        const currentValue = getFieldValue(stateRef.current.editActiveField);
-        const newValue = adjustTimeDigit(currentValue, stateRef.current.editCursorPosition, 1);
-        setFieldValue(stateRef.current.editActiveField, newValue);
-        updateDialog();
+        navigation.handleUp();
         return;
       }
       
       if (event.name === "down") {
-        const currentValue = getFieldValue(stateRef.current.editActiveField);
-        const newValue = adjustTimeDigit(currentValue, stateRef.current.editCursorPosition, -1);
-        setFieldValue(stateRef.current.editActiveField, newValue);
-        updateDialog();
+        navigation.handleDown();
         return;
       }
     };

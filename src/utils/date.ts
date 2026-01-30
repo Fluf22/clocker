@@ -8,9 +8,18 @@ export function formatDate(year: number, month: number, day: number): string {
   return `${year}-${m}-${d}`;
 }
 
+export function formatDateFromDate(date: Date): string {
+  return formatDate(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 export function isWeekend(year: number, month: number, day: number): boolean {
   const dayOfWeek = new Date(year, month, day).getDay();
   return dayOfWeek === 0 || dayOfWeek === 6;
+}
+
+export function isWeekendDate(date: Date): boolean {
+  const day = date.getDay();
+  return day === 0 || day === 6;
 }
 
 export function findNextWeekday(year: number, month: number, day: number, delta: number, daysInMonth: number): number {
@@ -35,4 +44,11 @@ export function getInitialWeekday(year: number, month: number, day: number): num
     }
   }
   return Math.max(1, d);
+}
+
+export function isFutureMonth(year: number, month: number): boolean {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  return year > currentYear || (year === currentYear && month > currentMonth);
 }

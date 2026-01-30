@@ -1,5 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import type { TimesheetEntry } from "../types/index.ts";
+import { formatHoursAsDuration } from "../utils/calendar.ts";
+import { KeyHint, KeyHintBar } from "./KeyHint.tsx";
 
 interface DayModalProps {
   date: string;
@@ -8,14 +10,6 @@ interface DayModalProps {
   dayLabel?: string;
   holidayNames?: string[];
   onClose: () => void;
-}
-
-function formatHoursAsDuration(hours: number | undefined): string {
-  if (hours === undefined || hours === 0) return "-";
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  if (m === 0) return `${h}h`;
-  return `${h}h${m}m`;
 }
 
 function formatTime(isoString: string | undefined): string {
@@ -115,10 +109,10 @@ export function DayModal({ date, entries, dayType, dayLabel, holidayNames, onClo
         </box>
       )}
 
-      <box justifyContent="center" gap={2}>
-        <text attributes={TextAttributes.DIM}>[Enter/Esc] Close</text>
-        {isEditable && <text attributes={TextAttributes.DIM}>[E] Edit</text>}
-      </box>
+       <KeyHintBar>
+         <KeyHint keyName="Enter/Esc" action="Close" />
+         {isEditable && <KeyHint keyName="E" action="Edit" />}
+       </KeyHintBar>
     </box>
   );
 }

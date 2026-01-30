@@ -6,6 +6,7 @@ import { BambooHRClient } from "../api/client.ts";
 import { scheduleReminderEmail } from "../email/sender.ts";
 import { getLastWorkingDay, getMonthName, getNextMonth } from "../utils/reminder.ts";
 import { setupCredentials, setupGmailAppPassword } from "../setup/index.ts";
+import { formatDate, isWeekendDate } from "../utils/date.ts";
 
 export async function handleSubmitFlag(): Promise<void> {
   let credentials = await loadCredentials();
@@ -52,10 +53,6 @@ export async function handleSubmitFlag(): Promise<void> {
     client.getHolidays(startOfMonth, endOfMonth),
   ]);
 
-  const isWeekend = (date: Date) => date.getDay() === 0 || date.getDay() === 6;
-  const formatDateStr = (y: number, m: number, d: number) => 
-    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-  
   const isHoliday = (dateStr: string) => 
     holidays.some((h) => dateStr >= h.start && dateStr <= h.end);
   const isTimeOffDay = (dateStr: string) => 
@@ -66,9 +63,9 @@ export async function handleSubmitFlag(): Promise<void> {
   const missingDays: string[] = [];
   for (let day = 1; day <= today.getDate(); day++) {
     const date = new Date(year, month, day);
-    const dateStr = formatDateStr(year, month, day);
+    const dateStr = formatDate(year, month, day);
     
-    if (!isWeekend(date) && !isHoliday(dateStr) && !isTimeOffDay(dateStr) && !hasEntry(dateStr)) {
+    if (!isWeekendDate(date) && !isHoliday(dateStr) && !isTimeOffDay(dateStr) && !hasEntry(dateStr)) {
       missingDays.push(dateStr);
     }
   }

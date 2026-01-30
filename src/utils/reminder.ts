@@ -1,16 +1,5 @@
 import type { Holiday, TimeOffRequest } from "../types/index.ts";
-
-function isWeekend(date: Date): boolean {
-  const day = date.getDay();
-  return day === 0 || day === 6;
-}
-
-function formatDateStr(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+import { formatDateFromDate, isWeekendDate } from "./date.ts";
 
 function isHoliday(dateStr: string, holidays: Holiday[]): boolean {
   return holidays.some((h) => dateStr >= h.start && dateStr <= h.end);
@@ -30,9 +19,9 @@ export function getLastWorkingDay(
   const date = new Date(lastDayOfMonth);
 
   while (date.getMonth() === month) {
-    const dateStr = formatDateStr(date);
+    const dateStr = formatDateFromDate(date);
     const isWorkingDay =
-      !isWeekend(date) &&
+      !isWeekendDate(date) &&
       !isHoliday(dateStr, holidays) &&
       !isTimeOff(dateStr, timeOff);
 
@@ -61,6 +50,5 @@ export function getNextMonth(year: number, month: number): { year: number; month
   return { year, month: month + 1 };
 }
 
-export function formatDate(year: number, month: number, day: number): string {
-  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
+// Re-export formatDate from date.ts for backwards compatibility
+export { formatDate } from "./date.ts";

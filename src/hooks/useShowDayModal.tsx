@@ -1,17 +1,13 @@
-import { useCallback, useRef, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useRef, type MutableRefObject } from "react";
 import type { CliRenderer } from "@opentui/core";
 import { DayModal } from "../components/DayModal.tsx";
 import { formatDate } from "../utils/date.ts";
 import type { DayInfo } from "./useDayInfo.ts";
 import type { TimesheetEntry } from "../types/index.ts";
+import type { DialogActions } from "../types/dialog.ts";
 
 interface DialogState {
   dialogOpen: boolean;
-}
-
-interface DialogActions {
-  show: (options: { content: () => ReactNode; closeOnEscape?: boolean; backdropOpacity?: number; id?: string; onClose?: () => void }) => unknown;
-  close: () => void;
 }
 
 interface UseShowDayModalParams {

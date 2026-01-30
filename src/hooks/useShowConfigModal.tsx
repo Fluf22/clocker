@@ -1,4 +1,4 @@
-import { useCallback, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, type MutableRefObject } from "react";
 import type { CliRenderer, InputRenderable } from "@opentui/core";
 import { ConfigModal, adjustTimeDigit, type ConfigField, type ConfigTab, type ConnectionAction, type InputMode } from "../components/ConfigModal.tsx";
 import { loadCredentials, saveCredentials } from "../config/credentials.ts";
@@ -6,11 +6,8 @@ import { loadGmailConfig, saveGmailConfig } from "../config/gmail.ts";
 import { verifyGmailCredentials } from "../email/sender.ts";
 import { openBrowser } from "../utils/cli.ts";
 import type { Employee, BasicCredentials, WorkSchedule, AppSettings } from "../types/index.ts";
-
-interface DialogActions {
-  show: (options: { content: () => ReactNode; closeOnEscape?: boolean; backdropOpacity?: number; id?: string; onClose?: () => void }) => unknown;
-  close: () => void;
-}
+import type { DialogActions } from "../types/dialog.ts";
+import { useTimeFieldNavigation, SCHEDULE_FIELDS } from "./useTimeFieldNavigation.ts";
 
 interface ConfigModalState {
   dialogOpen: boolean;
@@ -151,36 +148,17 @@ export function useShowConfigModal({
       });
     };
 
-    const fields: ConfigField[] = ["morningStart", "morningEnd", "afternoonStart", "afternoonEnd"];
     const connections: ConnectionAction[] = ["bamboohr", "gmail"];
-    
-    const getFieldValue = (field: ConfigField): string => {
-      if (!stateRef.current.configSchedule) return "00:00";
-      switch (field) {
-        case "morningStart": return stateRef.current.configSchedule.morning.start;
-        case "morningEnd": return stateRef.current.configSchedule.morning.end;
-        case "afternoonStart": return stateRef.current.configSchedule.afternoon.start;
-        case "afternoonEnd": return stateRef.current.configSchedule.afternoon.end;
-      }
-    };
-    
-    const setFieldValue = (field: ConfigField, value: string) => {
-      if (!stateRef.current.configSchedule) return;
-      switch (field) {
-        case "morningStart":
-          stateRef.current.configSchedule.morning.start = value;
-          break;
-        case "morningEnd":
-          stateRef.current.configSchedule.morning.end = value;
-          break;
-        case "afternoonStart":
-          stateRef.current.configSchedule.afternoon.start = value;
-          break;
-        case "afternoonEnd":
-          stateRef.current.configSchedule.afternoon.end = value;
-          break;
-      }
-    };
+
+    const navigation = useTimeFieldNavigation({
+      getSchedule: () => stateRef.current.configSchedule,
+      setSchedule: (schedule) => { stateRef.current.configSchedule = schedule; },
+      getActiveField: () => stateRef.current.configActiveField,
+      setActiveField: (field) => { stateRef.current.configActiveField = field; },
+      getCursorPosition: () => stateRef.current.configCursorPosition,
+      setCursorPosition: (pos) => { stateRef.current.configCursorPosition = pos; },
+      onUpdate: updateDialog,
+    });
 
     const saveConfig = async () => {
       if (!stateRef.current.configSchedule) return;
@@ -345,50 +323,36 @@ export function useShowConfigModal({
       }
       
       if (stateRef.current.configActiveTab === "schedule") {
-        if (event.name === "return") {
-          saveConfig();
-          return;
-        }
-        
-        if (event.name === "tab") {
-          const currentIndex = fields.indexOf(stateRef.current.configActiveField);
-          const nextIndex = event.shift 
-            ? (currentIndex - 1 + fields.length) % fields.length
-            : (currentIndex + 1) % fields.length;
-          stateRef.current.configActiveField = fields[nextIndex] ?? "morningStart";
-          stateRef.current.configCursorPosition = 0;
-          updateDialog();
-          return;
-        }
-        
-        if (event.name === "left") {
-          stateRef.current.configCursorPosition = Math.max(0, stateRef.current.configCursorPosition - 1);
-          updateDialog();
-          return;
-        }
-        
-        if (event.name === "right") {
-          stateRef.current.configCursorPosition = Math.min(3, stateRef.current.configCursorPosition + 1);
-          updateDialog();
-          return;
-        }
-        
-        if (event.name === "up") {
-          const currentValue = getFieldValue(stateRef.current.configActiveField);
-          const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, 1);
-          setFieldValue(stateRef.current.configActiveField, newValue);
-          updateDialog();
-          return;
-        }
-        
-        if (event.name === "down") {
-          const currentValue = getFieldValue(stateRef.current.configActiveField);
-          const newValue = adjustTimeDigit(currentValue, stateRef.current.configCursorPosition, -1);
-          setFieldValue(stateRef.current.configActiveField, newValue);
-          updateDialog();
-          return;
-        }
-      } else {
+         if (event.name === "return") {
+           saveConfig();
+           return;
+         }
+         
+         if (event.name === "tab") {
+           navigation.handleTab(event.shift ?? false);
+           return;
+         }
+         
+         if (event.name === "left") {
+           navigation.handleLeft();
+           return;
+         }
+         
+         if (event.name === "right") {
+           navigation.handleRight();
+           return;
+         }
+         
+         if (event.name === "up") {
+           navigation.handleUp();
+           return;
+         }
+         
+         if (event.name === "down") {
+           navigation.handleDown();
+           return;
+         }
+       } else {
         if (event.name === "up") {
           const currentIndex = connections.indexOf(stateRef.current.configSelectedConnection);
           const newIndex = (currentIndex - 1 + connections.length) % connections.length;

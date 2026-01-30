@@ -1,20 +1,25 @@
 import { TextAttributes } from "@opentui/core";
 import { memo } from "react";
+import { KeyHint } from "../KeyHint.tsx";
 
 export const InputStatusBar = memo(function InputStatusBar() {
   return (
     <>
-      <text attributes={TextAttributes.DIM}>[Type] Enter value</text>
-      <text attributes={TextAttributes.DIM}>[Enter] Confirm</text>
-      <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
+      <KeyHint keyName="Type" action="Enter value" />
+      <KeyHint keyName="Enter" action="Confirm" />
+      <KeyHint keyName="Esc" action="Cancel" />
     </>
   );
 });
 
-export const ModalHeader = memo(function ModalHeader() {
+interface ModalHeaderProps {
+  title?: string;
+}
+
+export const ModalHeader = memo(function ModalHeader({ title = "Settings" }: ModalHeaderProps) {
   return (
     <box justifyContent="center" marginBottom={1}>
-      <text attributes={TextAttributes.BOLD}>Settings</text>
+      <text attributes={TextAttributes.BOLD}>{title}</text>
     </box>
   );
 });
@@ -30,9 +35,9 @@ export const ErrorDisplay = memo(function ErrorDisplay({ error }: { error: strin
 export const ScheduleStatusBar = memo(function ScheduleStatusBar() {
   return (
     <>
-      <text attributes={TextAttributes.DIM}>[Arrows] Edit</text>
-      <text attributes={TextAttributes.DIM}>[Tab] Next</text>
-      <text attributes={TextAttributes.DIM}>[Enter] Save</text>
+      <KeyHint keyName="Arrows" action="Edit" />
+      <KeyHint keyName="Tab" action="Next" />
+      <KeyHint keyName="Enter" action="Save" />
     </>
   );
 });
@@ -40,14 +45,14 @@ export const ScheduleStatusBar = memo(function ScheduleStatusBar() {
 export const ConnectionsStatusBar = memo(function ConnectionsStatusBar() {
   return (
     <>
-      <text attributes={TextAttributes.DIM}>[↑/↓] Select</text>
-      <text attributes={TextAttributes.DIM}>[Enter] Reconfigure</text>
+      <KeyHint keyName="↑/↓" action="Select" />
+      <KeyHint keyName="Enter" action="Reconfigure" />
     </>
   );
 });
 
 export const TabSwitchHint = memo(function TabSwitchHint() {
-  return <text attributes={TextAttributes.DIM}>[&lt;/&gt;] Switch tab</text>;
+  return <KeyHint keyName="</>" action="Switch tab" />;
 });
 
 export const SavingIndicator = memo(function SavingIndicator() {
@@ -55,5 +60,25 @@ export const SavingIndicator = memo(function SavingIndicator() {
     <box justifyContent="center">
       <text attributes={TextAttributes.DIM}>Saving...</text>
     </box>
+  );
+});
+
+interface FutureMonthWarningProps {
+  action?: "editing" | "submission";
+}
+
+export const FutureMonthWarning = memo(function FutureMonthWarning({ action = "editing" }: FutureMonthWarningProps) {
+  return (
+    <>
+      <box justifyContent="center" marginBottom={1}>
+        <text>Timesheet not open yet</text>
+      </box>
+      <box justifyContent="center" marginBottom={1}>
+        <text attributes={TextAttributes.DIM}>This month's timesheet is not available for {action}.</text>
+      </box>
+      <box justifyContent="center">
+        <KeyHint keyName="Esc" action="Close" />
+      </box>
+    </>
   );
 });

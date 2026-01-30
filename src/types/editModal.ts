@@ -1,6 +1,6 @@
-import type { WorkSchedule } from "./index.ts";
+import type { WorkSchedule, ScheduleField } from "./index.ts";
 
-export type EditField = "morningStart" | "morningEnd" | "afternoonStart" | "afternoonEnd";
+export type EditField = ScheduleField;
 
 export interface EditModalProps {
   date: string;

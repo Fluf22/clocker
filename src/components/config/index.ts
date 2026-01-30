@@ -1,4 +1,5 @@
 export { TimeField, TimeDigit, BlinkingCursor } from "./TimeField.tsx";
+export { TimePeriodSection } from "./TimePeriodSection.tsx";
 export { TabBar } from "./TabBar.tsx";
 export { ConnectionItem } from "./ConnectionItem.tsx";
 export { ScheduleTab } from "./ScheduleTab.tsx";
@@ -12,4 +13,5 @@ export {
   ConnectionsStatusBar,
   TabSwitchHint,
   SavingIndicator,
+  FutureMonthWarning,
 } from "./StatusComponents.tsx";

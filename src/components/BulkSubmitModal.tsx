@@ -1,4 +1,7 @@
 import { TextAttributes } from "@opentui/core";
+import { formatHoursAsDuration } from "../utils/calendar.ts";
+import { ErrorDisplay, FutureMonthWarning } from "./config/index.ts";
+import { KeyHint, KeyHintBar } from "./KeyHint.tsx";
 
 interface BulkSubmitModalProps {
   missingDays: string[];
@@ -15,13 +18,6 @@ const COLORS = {
   warning: "#fbbf24",
 };
 
-function formatHours(hours: number): string {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  if (m === 0) return `${h}h`;
-  return `${h}h${m}m`;
-}
-
 export function BulkSubmitModal({ missingDays, hours, saving, progress, error, isFutureMonth }: BulkSubmitModalProps) {
   const totalHours = missingDays.length * hours;
   const hasMissingDays = missingDays.length > 0;
@@ -37,24 +33,10 @@ export function BulkSubmitModal({ missingDays, hours, saving, progress, error, i
         <text attributes={TextAttributes.BOLD}>Bulk Submit Hours</text>
       </box>
 
-      {error && (
-        <box justifyContent="center" marginBottom={1}>
-          <text attributes={TextAttributes.BOLD}>{error}</text>
-        </box>
-      )}
+      {error && <ErrorDisplay error={error} />}
 
       {isFutureMonth ? (
-        <>
-          <box justifyContent="center" marginBottom={1}>
-            <text>Timesheet not open yet</text>
-          </box>
-          <box justifyContent="center" marginBottom={1}>
-            <text attributes={TextAttributes.DIM}>This month's timesheet is not available for submission.</text>
-          </box>
-          <box justifyContent="center">
-            <text attributes={TextAttributes.DIM}>[Esc] Close</text>
-          </box>
-        </>
+        <FutureMonthWarning action="submission" />
       ) : hasMissingDays ? (
         <>
           <box justifyContent="center" marginBottom={1}>
@@ -62,33 +44,33 @@ export function BulkSubmitModal({ missingDays, hours, saving, progress, error, i
           </box>
 
           <box justifyContent="center" marginBottom={1}>
-            <text attributes={TextAttributes.DIM}>{`Will submit ${formatHours(hours)} for each (${formatHours(totalHours)} total)`}</text>
+            <text attributes={TextAttributes.DIM}>{`Will submit ${formatHoursAsDuration(hours)} for each (${formatHoursAsDuration(totalHours)} total)`}</text>
           </box>
 
-          {saving ? (
-            <box flexDirection="column" alignItems="center">
-              <text>{`Submitting... ${progress}/${missingDays.length}`}</text>
-              <box marginTop={1}>
-                <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
-              </box>
-            </box>
-          ) : (
-            <box justifyContent="center" gap={2}>
-              <text attributes={TextAttributes.DIM}>[Enter] Submit All</text>
-              <text attributes={TextAttributes.DIM}>[Esc] Cancel</text>
-            </box>
-          )}
+           {saving ? (
+             <box flexDirection="column" alignItems="center">
+               <text>{`Submitting... ${progress}/${missingDays.length}`}</text>
+               <box marginTop={1}>
+                 <KeyHint keyName="Esc" action="Cancel" />
+               </box>
+             </box>
+           ) : (
+             <KeyHintBar>
+               <KeyHint keyName="Enter" action="Submit All" />
+               <KeyHint keyName="Esc" action="Cancel" />
+             </KeyHintBar>
+           )}
         </>
-      ) : (
-        <>
-          <box justifyContent="center" marginBottom={1}>
-            <text>All days have been submitted!</text>
-          </box>
-          <box justifyContent="center">
-            <text attributes={TextAttributes.DIM}>[Esc] Close</text>
-          </box>
-        </>
-      )}
+       ) : (
+         <>
+           <box justifyContent="center" marginBottom={1}>
+             <text>All days have been submitted!</text>
+           </box>
+           <box justifyContent="center">
+             <KeyHint keyName="Esc" action="Close" />
+           </box>
+         </>
+       )}
     </box>
   );
 }

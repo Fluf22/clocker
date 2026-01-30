@@ -1,20 +1,17 @@
-import { useCallback, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, type MutableRefObject } from "react";
 import type { CliRenderer } from "@opentui/core";
 import { BambooHRClient } from "../api/client.ts";
 import { BulkSubmitModal } from "../components/BulkSubmitModal.tsx";
 import { getScheduleHours } from "../components/EditModal.tsx";
+import { isFutureMonth } from "../utils/date.ts";
 import type { WorkSchedule } from "../types/index.ts";
+import type { DialogActions } from "../types/dialog.ts";
 
 interface BulkModalState {
   dialogOpen: boolean;
   saving: boolean;
   saveError: string | null;
   bulkProgress: number;
-}
-
-interface DialogActions {
-  show: (options: { content: () => ReactNode; closeOnEscape?: boolean; backdropOpacity?: number; id?: string; onClose?: () => void }) => unknown;
-  close: () => void;
 }
 
 interface UseShowBulkModalParams {
@@ -44,10 +41,7 @@ export function useShowBulkModal({
     if (stateRef.current.dialogOpen) return;
     stateRef.current.dialogOpen = true;
     
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-    const isFutureMonth = year > currentYear || (year === currentYear && month > currentMonth);
+    const isMonthInFuture = isFutureMonth(year, month);
     
     const missingDays = getMissingDays();
     const hoursPerDay = getScheduleHours(workSchedule);
@@ -76,7 +70,7 @@ export function useShowBulkModal({
             saving={stateRef.current.saving}
             progress={stateRef.current.bulkProgress}
             error={stateRef.current.saveError}
-            isFutureMonth={isFutureMonth}
+            isFutureMonth={isMonthInFuture}
           />
         ),
         closeOnEscape: !stateRef.current.saving,
@@ -123,7 +117,7 @@ export function useShowBulkModal({
     };
 
     const bulkHandler = (event: { name: string }) => {
-      if (event.name === "return" && !stateRef.current.saving && missingDays.length > 0 && !isFutureMonth) {
+      if (event.name === "return" && !stateRef.current.saving && missingDays.length > 0 && !isMonthInFuture) {
         bulkSubmit();
       }
     };

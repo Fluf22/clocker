@@ -1,8 +1,8 @@
 import type { InputRenderable } from "@opentui/core";
-import type { WorkSchedule } from "./index.ts";
+import type { WorkSchedule, ScheduleField } from "./index.ts";
 
 export type ConfigTab = "schedule" | "connections";
-export type ConfigField = "morningStart" | "morningEnd" | "afternoonStart" | "afternoonEnd";
+export type ConfigField = ScheduleField;
 export type ConnectionAction = "bamboohr" | "gmail";
 export type InputMode = "none" | "bamboohr_domain" | "bamboohr_apikey" | "gmail_password";
 
