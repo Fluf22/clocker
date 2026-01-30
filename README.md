@@ -7,7 +7,7 @@ Terminal User Interface for submitting monthly work timesheets to BambooHR.
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Fluf22/clocker/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Fluf22/clocker/master/install.sh | sh
 ```
 
 This downloads the pre-built binary for your platform and installs it to `~/.clocker/bin`.
